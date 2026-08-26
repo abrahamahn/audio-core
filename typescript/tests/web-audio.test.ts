@@ -45,6 +45,44 @@ class FakeDynamicsCompressorNode extends FakeAudioNode {
   readonly release = new FakeAudioParam();
 }
 
+class FakeBiquadFilterNode extends FakeAudioNode {
+  type: BiquadFilterType = 'lowpass';
+  readonly frequency = new FakeAudioParam();
+  readonly Q = new FakeAudioParam();
+  readonly gain = new FakeAudioParam();
+}
+
+class FakeWaveShaperNode extends FakeAudioNode {
+  curve: Float32Array<ArrayBuffer> | null = null;
+  oversample: OverSampleType = 'none';
+}
+
+class FakeDelayNode extends FakeAudioNode {
+  readonly delayTime = new FakeAudioParam();
+}
+
+class FakeConvolverNode extends FakeAudioNode {
+  buffer: AudioBuffer | null = null;
+}
+
+class FakeAudioBuffer {
+  readonly data: Float32Array<ArrayBuffer>[];
+
+  constructor(
+    readonly numberOfChannels: number,
+    readonly length: number,
+    readonly sampleRate: number,
+  ) {
+    this.data = Array.from({ length: numberOfChannels }, () => new Float32Array(length));
+  }
+
+  getChannelData(channel: number): Float32Array<ArrayBuffer> {
+    const data = this.data[channel];
+    if (data === undefined) throw new RangeError('unknown channel');
+    return data;
+  }
+}
+
 class FakeBufferSourceNode extends FakeAudioNode {
   buffer: unknown = null;
   loop = false;
@@ -60,11 +98,16 @@ class FakeBufferSourceNode extends FakeAudioNode {
 
 class FakeAudioContext {
   currentTime = 10;
+  sampleRate = 48_000;
   readonly destination = new FakeAudioNode();
   readonly gains: FakeGainNode[] = [];
   readonly panners: FakeStereoPannerNode[] = [];
   readonly sources: FakeBufferSourceNode[] = [];
   readonly compressors: FakeDynamicsCompressorNode[] = [];
+  readonly filters: FakeBiquadFilterNode[] = [];
+  readonly shapers: FakeWaveShaperNode[] = [];
+  readonly delays: FakeDelayNode[] = [];
+  readonly convolvers: FakeConvolverNode[] = [];
   readonly mediaSources = new Map<object, FakeAudioNode>();
   readonly createMediaElementSource = vi.fn((element: object) => {
     const source = new FakeAudioNode();
@@ -94,6 +137,34 @@ class FakeAudioContext {
     const compressor = new FakeDynamicsCompressorNode();
     this.compressors.push(compressor);
     return compressor;
+  }
+
+  createBiquadFilter(): FakeBiquadFilterNode {
+    const filter = new FakeBiquadFilterNode();
+    this.filters.push(filter);
+    return filter;
+  }
+
+  createWaveShaper(): FakeWaveShaperNode {
+    const shaper = new FakeWaveShaperNode();
+    this.shapers.push(shaper);
+    return shaper;
+  }
+
+  createDelay(): FakeDelayNode {
+    const delay = new FakeDelayNode();
+    this.delays.push(delay);
+    return delay;
+  }
+
+  createConvolver(): FakeConvolverNode {
+    const convolver = new FakeConvolverNode();
+    this.convolvers.push(convolver);
+    return convolver;
+  }
+
+  createBuffer(numberOfChannels: number, length: number, sampleRate: number): FakeAudioBuffer {
+    return new FakeAudioBuffer(numberOfChannels, length, sampleRate);
   }
 }
 
@@ -198,6 +269,91 @@ describe('WebAudioOutput single-channel mode', () => {
 });
 
 describe('WebAudioOutput multi-channel mode', () => {
+  it('inserts controllable master and channel effect chains', () => {
+    const context = new FakeAudioContext();
+    const output = new WebAudioOutput(
+      audioContext(context),
+      {
+        mode: 'multi-channel',
+        channels: { music: {}, effects: {} },
+      },
+      {
+        masterEffects: [
+          { id: 'cut-rumble', type: 'highpass', frequencyHz: 30 },
+          {
+            id: 'tone',
+            type: 'equalizer',
+            bands: [
+              { type: 'lowshelf', frequencyHz: 120, gainDb: 2 },
+              { type: 'peaking', frequencyHz: 1_500, gainDb: -1.5, q: 1.2 },
+              { type: 'highshelf', frequencyHz: 8_000, gainDb: 1 },
+            ],
+          },
+          { id: 'warmth', type: 'saturation', drive: 3, mix: 0.4 },
+          { id: 'glue', type: 'compressor', thresholdDb: -18, ratio: 3, mix: 0.8 },
+          { id: 'room', type: 'reverb', roomSize: 0.2, wet: 0.15 },
+          { id: 'echo', type: 'delay', delaySeconds: 0.2, feedback: 0.25, wet: 0.1 },
+        ],
+        channelEffects: {
+          music: [{ id: 'music-soften', type: 'lowpass', frequencyHz: 14_000 }],
+        },
+      },
+    );
+
+    expect(output.masterEffectChain?.size).toBe(6);
+    expect(output.channelEffectChain('music')?.size).toBe(1);
+    expect(output.channelEffectChain('effects')).toBeNull();
+    expect(context.filters).toHaveLength(5);
+    expect(context.shapers).toHaveLength(1);
+    expect(context.compressors).toHaveLength(1);
+    expect(context.convolvers).toHaveLength(1);
+    expect(context.delays).toHaveLength(2);
+
+    const saturation = output.masterEffectChain?.effect('warmth');
+    if (saturation?.type !== 'saturation') throw new Error('missing saturation');
+    saturation.setDrive(5);
+    saturation.setMix(0.25);
+    expect(saturation.wetNode.gain.value).toBe(0.25);
+
+    const compressor = output.masterEffectChain?.effect('glue');
+    if (compressor?.type !== 'compressor') throw new Error('missing compressor');
+    compressor.setMakeupGainDb(6);
+    expect(compressor.makeupNode.gain.value).toBeCloseTo(1.995, 3);
+
+    const delay = output.masterEffectChain?.effect('echo');
+    if (delay?.type !== 'delay') throw new Error('missing delay');
+    delay.setDelaySeconds(0.4);
+    expect(delay.delayNode.delayTime.value).toBe(0.4);
+    expect(() => {
+      delay.setDelaySeconds(0);
+    }).toThrow(/delaySeconds/u);
+    output.dispose();
+  });
+
+  it('rejects duplicate effects and effects assigned to unknown channels', () => {
+    const topology = {
+      mode: 'multi-channel',
+      channels: { music: {} },
+    } as const;
+    expect(
+      () =>
+        new WebAudioOutput(audioContext(new FakeAudioContext()), topology, {
+          masterEffects: [
+            { id: 'same', type: 'highpass', frequencyHz: 20 },
+            { id: 'same', type: 'lowpass', frequencyHz: 10_000 },
+          ],
+        }),
+    ).toThrow(/duplicate/u);
+    expect(
+      () =>
+        new WebAudioOutput(audioContext(new FakeAudioContext()), topology, {
+          channelEffects: {
+            dialogue: [{ id: 'voice', type: 'compressor' }],
+          } as never,
+        }),
+    ).toThrow(/unknown audio channel/u);
+  });
+
   it('reports voice, capacity, and ducking lifecycle without owning telemetry transport', () => {
     const context = new FakeAudioContext();
     const events: AudioOutputTelemetryEvent<'effects'>[] = [];

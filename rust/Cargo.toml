@@ -1,0 +1,18 @@
+[package]
+name = "abrahamahn-audio-core"
+description = "Portable audio effect contracts and DSP processors"
+documentation = "https://docs.rs/abrahamahn-audio-core"
+edition.workspace = true
+homepage = "https://github.com/abrahamahn/audio-core"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/abrahamahn/audio-core"
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+name = "audio_core"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

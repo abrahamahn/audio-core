@@ -5,3 +5,4 @@ typescript/dist/
 typescript/node_modules/
 typescript/coverage/
 typescript/*.tgz
+target/

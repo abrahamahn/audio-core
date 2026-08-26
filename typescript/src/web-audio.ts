@@ -6,6 +6,7 @@ import {
   type AudioOutputTopology,
   type AudioVoiceOverflowPolicy,
 } from './output.js';
+import { validateAudioEffectChain, type AudioEffectConfig } from './effects.js';
 import { clampAudioLevel, clampPan } from './policy.js';
 import {
   emitAudioTelemetry,
@@ -14,12 +15,17 @@ import {
   type AudioStreamTelemetryEvent,
   type AudioTelemetrySink,
 } from './telemetry.js';
+import { WebAudioEffectChain } from './web-audio-effects.js';
 
 export interface WebAudioOutputOptions<Channel extends string = string> {
   readonly destination?: AudioNode;
   readonly masterLevel?: number;
   /** Optional final dynamics stage between MASTER and destination. */
   readonly limiter?: false | AudioLimiterConfig;
+  /** Serial insert effects placed on the master bus before its fader and final limiter. */
+  readonly masterEffects?: readonly AudioEffectConfig[];
+  /** Serial insert effects placed before an individual channel fader. */
+  readonly channelEffects?: Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>;
   readonly telemetry?: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>>;
 }
 
@@ -61,7 +67,11 @@ interface ActiveSlot {
 }
 
 interface ChannelState {
+  /** Post-effect channel fader used by level and ducking policy. */
   readonly input: GainNode;
+  /** Pre-effect destination for newly routed voices. */
+  readonly route: AudioNode;
+  readonly effects: WebAudioEffectChain | null;
   readonly config: ResolvedChannelConfig;
   readonly active: Set<ActiveSlot>;
   baseLevel: number;
@@ -75,6 +85,10 @@ export class WebAudioOutput<Channel extends string> {
   readonly #context: AudioContext;
   readonly #master: GainNode;
   readonly #limiter: DynamicsCompressorNode | null;
+  readonly #masterEffects: WebAudioEffectChain | null;
+  readonly #channelEffectConfigs:
+    | Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>
+    | undefined;
   readonly #telemetry: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>> | undefined;
   readonly #channels = new Map<Channel, ChannelState>();
   readonly #mediaSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
@@ -86,11 +100,15 @@ export class WebAudioOutput<Channel extends string> {
     options: WebAudioOutputOptions<Channel> = {},
   ) {
     const channels = resolveChannels(topology);
+    validateEffectOptions(channels, options);
     this.#context = context;
     this.#telemetry = options.telemetry;
+    this.#channelEffectConfigs = options.channelEffects;
     this.#master = context.createGain();
     this.#master.gain.value = clampAudioLevel(options.masterLevel ?? 1);
     const destination = options.destination ?? context.destination;
+    this.#masterEffects = createOptionalEffectChain(context, options.masterEffects);
+    if (this.#masterEffects !== null) this.#masterEffects.outputNode.connect(this.#master);
     if (
       options.limiter !== undefined &&
       options.limiter !== false &&
@@ -112,6 +130,14 @@ export class WebAudioOutput<Channel extends string> {
 
   get limiterNode(): DynamicsCompressorNode | null {
     return this.#limiter;
+  }
+
+  get masterEffectChain(): WebAudioEffectChain | null {
+    return this.#masterEffects;
+  }
+
+  channelEffectChain(channel: Channel): WebAudioEffectChain | null {
+    return this.#channel(channel).effects;
   }
 
   setMasterLevel(level: number): void {
@@ -254,7 +280,9 @@ export class WebAudioOutput<Channel extends string> {
     for (const state of this.#channels.values()) {
       terminateAll(state.active);
       state.input.disconnect();
+      state.effects?.dispose();
     }
+    this.#masterEffects?.dispose();
     this.#limiter?.disconnect();
     this.#master.disconnect();
     this.#disposed = true;
@@ -263,9 +291,17 @@ export class WebAudioOutput<Channel extends string> {
   #addChannel(channel: Channel, config: ResolvedChannelConfig): void {
     const input = this.#context.createGain();
     input.gain.value = config.level;
-    input.connect(this.#master);
+    const effects = createOptionalEffectChain(this.#context, this.#channelEffectConfigs?.[channel]);
+    const masterInput = this.#masterEffects?.inputNode ?? this.#master;
+    if (effects === null) input.connect(masterInput);
+    else {
+      effects.outputNode.connect(input);
+      input.connect(masterInput);
+    }
     this.#channels.set(channel, {
       input,
+      route: effects?.inputNode ?? input,
+      effects,
       config,
       active: new Set(),
       baseLevel: config.level,
@@ -341,10 +377,10 @@ export class WebAudioOutput<Channel extends string> {
 
     try {
       source.connect(trim);
-      if (panner === null) trim.connect(state.input);
+      if (panner === null) trim.connect(state.route);
       else {
         trim.connect(panner);
-        panner.connect(state.input);
+        panner.connect(state.route);
       }
       connected = true;
       started = true;
@@ -381,6 +417,41 @@ export class WebAudioOutput<Channel extends string> {
     if (this.#disposed) throw new Error('audio output is disposed');
   }
 }
+
+function createOptionalEffectChain(
+  context: AudioContext,
+  effects: readonly AudioEffectConfig[] | undefined,
+): WebAudioEffectChain | null {
+  return effects === undefined || effects.length === 0
+    ? null
+    : new WebAudioEffectChain(context, effects);
+}
+
+function validateEffectOptions<Channel extends string>(
+  channels: readonly (readonly [Channel, ResolvedChannelConfig])[],
+  options: WebAudioOutputOptions<Channel>,
+): void {
+  validateAudioEffectChain(options.masterEffects ?? []);
+  const knownChannels = new Set(channels.map(([channel]) => channel));
+  for (const [channel, effects] of Object.entries(options.channelEffects ?? {})) {
+    if (!knownChannels.has(channel as Channel)) {
+      throw new RangeError(`effects configured for unknown audio channel: ${channel}`);
+    }
+    validateAudioEffectChain(effects as readonly AudioEffectConfig[]);
+  }
+}
+
+export {
+  WebAudioEffectChain,
+  type WebAudioCompressorEffectHandle,
+  type WebAudioDelayEffectHandle,
+  type WebAudioEffectHandle,
+  type WebAudioEffectHandleBase,
+  type WebAudioEqualizerEffectHandle,
+  type WebAudioFilterEffectHandle,
+  type WebAudioReverbEffectHandle,
+  type WebAudioSaturationEffectHandle,
+} from './web-audio-effects.js';
 
 export interface WebAudioStreamControllerOptions<Channel extends string>
   extends Omit<WebAudioOutputOptions<Channel>, 'telemetry'> {

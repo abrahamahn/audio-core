@@ -23,6 +23,11 @@
       "source": "./src/web-audio.ts",
       "types": "./dist/web-audio.d.ts",
       "default": "./dist/web-audio.js"
+    },
+    "./web-audio-effects": {
+      "source": "./src/web-audio-effects.ts",
+      "types": "./dist/web-audio-effects.d.ts",
+      "default": "./dist/web-audio-effects.js"
     }
   },
   "files": [

@@ -16,3 +16,12 @@ pnpm pack --dry-run
 
 Every behavioral change needs focused success, failure, invalid-input, and resource-boundary tests
 where applicable. Public API changes must update the README and changelog.
+
+Rust changes must also pass:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown
+```

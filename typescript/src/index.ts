@@ -1,5 +1,18 @@
 export { AudioAssetCache, type AudioAssetCacheOptions } from './assets.js';
 export {
+  validateAudioEffectChain,
+  validateAudioEffectConfig,
+  type AudioCompressorEffectConfig,
+  type AudioDelayEffectConfig,
+  type AudioEffectBase,
+  type AudioEffectConfig,
+  type AudioEqualizerBand,
+  type AudioEqualizerEffectConfig,
+  type AudioFilterEffectConfig,
+  type AudioReverbEffectConfig,
+  type AudioSaturationEffectConfig,
+} from './effects.js';
+export {
   AudioContextLifecycle,
   type AudioContextLifecycleOptions,
   type RecoverableAudioContext,

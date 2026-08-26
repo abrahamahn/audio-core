@@ -19,3 +19,8 @@
 - Add typed, failure-isolated telemetry contracts without imposing a telemetry backend.
 - Add context recovery and stream lifecycle telemetry, including soft autoplay/readiness failures.
 - Add real-browser Web Audio graph coverage in Chromium and WebKit.
+- Add serial per-channel and master Web Audio effect chains with high-pass, low-pass, multi-band EQ,
+  saturation, compression, deterministic convolution reverb, and feedback delay.
+- Add live Web Audio effect handles for bypass and parameter control.
+- Add a Rust DSP crate with matching effect categories, in-place interleaved processing, native
+  tests, strict linting, and `wasm32-unknown-unknown` compilation.

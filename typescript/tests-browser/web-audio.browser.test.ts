@@ -49,6 +49,25 @@ describe('WebAudioOutput in a real browser audio graph', () => {
       },
       {
         limiter: { thresholdDb: -8, ratio: 5 },
+        masterEffects: [
+          { id: 'highpass', type: 'highpass', frequencyHz: 30 },
+          {
+            id: 'eq',
+            type: 'equalizer',
+            bands: [
+              { type: 'lowshelf', frequencyHz: 100, gainDb: 1 },
+              { type: 'peaking', frequencyHz: 1_500, gainDb: -1, q: 1.2 },
+              { type: 'highshelf', frequencyHz: 8_000, gainDb: 1 },
+            ],
+          },
+          { id: 'saturation', type: 'saturation', drive: 2, mix: 0.3 },
+          { id: 'compressor', type: 'compressor', thresholdDb: -18, ratio: 3 },
+          { id: 'reverb', type: 'reverb', roomSize: 0, wet: 0.1 },
+          { id: 'delay', type: 'delay', delaySeconds: 0.05, feedback: 0.2, wet: 0.1 },
+        ],
+        channelEffects: {
+          music: [{ id: 'lowpass', type: 'lowpass', frequencyHz: 16_000 }],
+        },
         telemetry: (event) => events.push(event),
       },
     );
@@ -67,6 +86,12 @@ describe('WebAudioOutput in a real browser audio graph', () => {
     expect(second).not.toBeNull();
     expect(rejected).toBeNull();
     expect(output.limiterNode).toBeInstanceOf(DynamicsCompressorNode);
+    expect(output.masterEffectChain?.size).toBe(6);
+    expect(output.channelEffectChain('music')?.size).toBe(1);
+    const compressor = output.masterEffectChain?.effect('compressor');
+    expect(compressor?.type).toBe('compressor');
+    if (compressor?.type !== 'compressor') throw new Error('missing compressor');
+    expect(compressor.compressorNode).toBeInstanceOf(DynamicsCompressorNode);
     expect(output.activeVoiceCount('effects')).toBe(2);
     expect(events.some(({ type }) => type === 'output.voice-dropped')).toBe(true);
     expect(events.some(({ type }) => type === 'output.duck')).toBe(true);

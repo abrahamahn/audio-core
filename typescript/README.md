@@ -4,7 +4,7 @@ The TypeScript implementation of [`audio-core`](https://github.com/abrahamahn/au
 framework-neutral cue/sequence planning, replay deduplication, active-voice cancellation,
 spatial/mix and preference policy, manifest-driven asset selection, context lifecycle, bounded
 injected asset caching, and optional Web Audio output topology with stream replacement, ducking,
-limiting, and failure-isolated telemetry contracts.
+limiting, per-channel/master effect chains, and failure-isolated telemetry contracts.
 
 The root entrypoint does not create an `AudioContext`, read browser storage, fetch a fixed asset, or
 define application cue names. The `./web-audio` entrypoint routes caller-owned streams and decoded
@@ -49,7 +49,25 @@ const output = new WebAudioOutput(
       effects: { maxVoices: 16, overflow: 'reject-new' },
     },
   },
-  { limiter: { thresholdDb: -8, ratio: 5 } },
+  {
+    masterEffects: [
+      { id: 'highpass', type: 'highpass', frequencyHz: 30 },
+      {
+        id: 'eq',
+        type: 'equalizer',
+        bands: [
+          { type: 'lowshelf', frequencyHz: 100, gainDb: 1 },
+          { type: 'peaking', frequencyHz: 1_500, gainDb: -1, q: 1.2 },
+          { type: 'highshelf', frequencyHz: 8_000, gainDb: 1 },
+        ],
+      },
+      { id: 'saturation', type: 'saturation', drive: 2, mix: 0.25 },
+      { id: 'compressor', type: 'compressor', thresholdDb: -18, ratio: 3 },
+      { id: 'reverb', type: 'reverb', roomSize: 0.35, wet: 0.12 },
+      { id: 'delay', type: 'delay', delaySeconds: 0.18, feedback: 0.2, wet: 0.08 },
+    ],
+    limiter: { thresholdDb: -8, ratio: 5 },
+  },
 );
 
 output.playBuffer(explosion, { channel: 'effects', level: 0.8, pan: 0.2 });
