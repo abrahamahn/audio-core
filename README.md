@@ -178,5 +178,7 @@ pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
+pnpm exec playwright install chromium webkit
+pnpm test:browser
 pnpm pack --dry-run
 ```

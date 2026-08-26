@@ -25,4 +25,6 @@ jobs:
           cache-dependency-path: typescript/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm prepack
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - run: pnpm test:browser
       - run: pnpm pack --dry-run

@@ -9,6 +9,8 @@ Run the complete TypeScript package gate before opening a pull request:
 cd typescript
 pnpm install --frozen-lockfile
 pnpm prepack
+pnpm exec playwright install chromium webkit
+pnpm test:browser
 pnpm pack --dry-run
 ```
 
