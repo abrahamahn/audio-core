@@ -10,6 +10,8 @@ The root entrypoint does not create an `AudioContext`, read browser storage, fet
 define application cue names. The `./web-audio` entrypoint routes caller-owned streams and decoded
 buffers through either one replaceable channel or named simultaneous channels under a master bus;
 its stream controller serializes readiness-aware replacements and optional crossfades.
+Context recovery and stream/output/cache/runtime telemetry are typed, injected, and isolated so a
+failing observer cannot alter playback.
 
 ```ts
 import {
@@ -38,13 +40,17 @@ console.log(scheduler.commit(planned, 1_000), lifecycle, clampPan(1.4), assets);
 ```ts
 import { WebAudioOutput } from '@abrahamahn/audio-core/web-audio';
 
-const output = new WebAudioOutput(context, {
-  mode: 'multi-channel',
-  channels: {
-    music: { maxVoices: 1, overflow: 'stop-oldest' },
-    effects: { maxVoices: 16, overflow: 'reject-new' },
+const output = new WebAudioOutput(
+  context,
+  {
+    mode: 'multi-channel',
+    channels: {
+      music: { maxVoices: 1, overflow: 'stop-oldest' },
+      effects: { maxVoices: 16, overflow: 'reject-new' },
+    },
   },
-}, { limiter: { thresholdDb: -8, ratio: 5 } });
+  { limiter: { thresholdDb: -8, ratio: 5 } },
+);
 
 output.playBuffer(explosion, { channel: 'effects', level: 0.8, pan: 0.2 });
 output.duck([{ channel: 'music', level: 0.4 }], {

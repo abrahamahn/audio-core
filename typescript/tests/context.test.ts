@@ -46,10 +46,14 @@ describe('AudioContextLifecycle', () => {
       state: 'interrupted',
       resume: vi.fn().mockRejectedValue(error),
     };
-    const onResumeError = vi.fn();
+    const events: string[] = [];
+    const onResumeError = vi.fn(() => {
+      throw new Error('diagnostic callback failed');
+    });
     const lifecycle = new AudioContextLifecycle({
       createContext: () => context,
       onResumeError,
+      telemetry: (event) => events.push(event.type),
     });
 
     lifecycle.acquire();
@@ -60,5 +64,12 @@ describe('AudioContextLifecycle', () => {
       lifecycle.acquire();
       expect(context.resume).toHaveBeenCalledTimes(2);
     });
+    expect(events).toEqual([
+      'context.created',
+      'context.resume-requested',
+      'context.resume-failed',
+      'context.resume-requested',
+      'context.resume-failed',
+    ]);
   });
 });

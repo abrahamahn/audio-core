@@ -134,15 +134,19 @@ const musicOutput = new WebAudioOutput(context, {
 musicOutput.connectMediaElement(audioElement, { channel: 'music' });
 
 // Games: independent channels mix simultaneous bounded voices into MASTER.
-const gameOutput = new WebAudioOutput(context, {
-  mode: 'multi-channel',
-  channels: {
-    music: { maxVoices: 1, overflow: 'stop-oldest' },
-    effects: { maxVoices: 24, overflow: 'reject-new' },
-    dialogue: { maxVoices: 2, overflow: 'stop-oldest' },
-    ui: { maxVoices: 4, overflow: 'reject-new' },
+const gameOutput = new WebAudioOutput(
+  context,
+  {
+    mode: 'multi-channel',
+    channels: {
+      music: { maxVoices: 1, overflow: 'stop-oldest' },
+      effects: { maxVoices: 24, overflow: 'reject-new' },
+      dialogue: { maxVoices: 2, overflow: 'stop-oldest' },
+      ui: { maxVoices: 4, overflow: 'reject-new' },
+    },
   },
-}, { limiter: { thresholdDb: -8, ratio: 5 } });
+  { limiter: { thresholdDb: -8, ratio: 5 } },
+);
 gameOutput.playBuffer(cardBuffer, { channel: 'effects', pan: -0.35 });
 gameOutput.playBuffer(chipBuffer, { channel: 'effects', pan: 0.4 });
 gameOutput.duck([{ channel: 'music', level: 0.35 }], {
@@ -156,6 +160,10 @@ gameOutput.duck([{ channel: 'music', level: 0.35 }], {
 readiness-aware replacement and optional crossfades for one logical music or radio stream. Media
 elements and their URLs remain caller-owned.
 
+The Web Audio graph is exercised in real headless Chromium and WebKit in addition to the pure unit
+suite. The browser gate covers single-channel replacement, simultaneous named-channel voices,
+capacity rejection, limiter construction, ducking, and telemetry delivery.
+
 ## Extension points
 
 `AudioAssetCache` accepts any object-shaped decode context and any decoded result type.
@@ -163,11 +171,12 @@ elements and their URLs remain caller-owned.
 independent of browser globals while preserving the essential rule that decoded buffers belong to
 one context. `AudioCueRequest` is generic over the application cue vocabulary.
 
-## Deliberate next-stage work
+## Scope closure and optional adapters
 
-The initial extraction does not claim to be the complete future audio engine. Adaptive streaming
-and an optional Babylon spatial adapter should be added only with real consumers and browser
-parity tests. They should not be simulated in Rust or hidden inside product-specific synthesis.
+The reusable `0.1` engine boundary is complete for its declared scope. It deliberately does not own
+adaptive bitrate delivery, captions, a media catalog, React settings, or Babylon world positioning.
+Those are integration packages or product behavior and should be added only with real consumers.
+They should not be simulated in Rust or hidden inside product-specific synthesis.
 
 ## Development
 

@@ -17,4 +17,5 @@
 - Add validated asset manifests, capability-aware variants, and decode/stream selection policy.
 - Add storage-neutral preference normalization and effective-level calculation.
 - Add typed, failure-isolated telemetry contracts without imposing a telemetry backend.
+- Add context recovery and stream lifecycle telemetry, including soft autoplay/readiness failures.
 - Add real-browser Web Audio graph coverage in Chromium and WebKit.

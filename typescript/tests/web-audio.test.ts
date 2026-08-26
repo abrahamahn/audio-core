@@ -376,9 +376,11 @@ describe('WebAudioStreamController', () => {
   it('crossfades replacements and recovers playback across visibility changes', async () => {
     vi.useFakeTimers();
     const context = new FakeAudioContext();
+    const events: string[] = [];
     const controller = new WebAudioStreamController(audioContext(context), {
       channel: 'music',
       defaultCrossfadeMs: 200,
+      telemetry: (event) => events.push(event.type),
     });
     const first = new FakeMediaElement();
     const second = new FakeMediaElement();
@@ -399,6 +401,9 @@ describe('WebAudioStreamController', () => {
     await expect(controller.setVisibility('visible')).resolves.toBe(true);
     expect(second.paused).toBe(false);
     expect(second.play).toHaveBeenCalledTimes(2);
+    expect(events).toContain('stream.replaced');
+    expect(events).toContain('stream.suspended');
+    expect(events).toContain('stream.resumed');
     controller.dispose();
   });
 
@@ -437,8 +442,10 @@ describe('WebAudioStreamController', () => {
 
   it('keeps the current stream when replacement autoplay fails', async () => {
     const context = new FakeAudioContext();
+    const events: string[] = [];
     const controller = new WebAudioStreamController(audioContext(context), {
       channel: 'music',
+      telemetry: (event) => events.push(event.type),
     });
     const current = new FakeMediaElement();
     const failed = new FakeMediaElement();
@@ -449,6 +456,7 @@ describe('WebAudioStreamController', () => {
     expect(controller.currentElement).toBe(mediaElement(current));
     expect(controller.output.activeVoiceCount('music')).toBe(1);
     expect(current.pause).not.toHaveBeenCalled();
+    expect(events).toContain('stream.replace-failed');
     controller.dispose();
   });
 

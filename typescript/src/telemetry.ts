@@ -33,6 +33,28 @@ export type AudioOutputTelemetryEvent<Channel extends string> =
       readonly channels: readonly Channel[];
     };
 
+export type AudioStreamTelemetryEvent<Channel extends string> =
+  | {
+      readonly type: 'stream.replaced';
+      readonly channel: Channel;
+      readonly crossfadeMs: number;
+    }
+  | {
+      readonly type: 'stream.replace-failed';
+      readonly channel: Channel;
+      readonly reason: 'autoplay' | 'capacity' | 'disposed' | 'not-ready';
+    }
+  | { readonly type: 'stream.suspended'; readonly channel: Channel }
+  | { readonly type: 'stream.resumed'; readonly channel: Channel }
+  | { readonly type: 'stream.resume-failed'; readonly channel: Channel };
+
+export type AudioContextTelemetryEvent =
+  | { readonly type: 'context.created' }
+  | { readonly type: 'context.resume-requested' }
+  | { readonly type: 'context.resumed' }
+  | { readonly type: 'context.resume-failed' }
+  | { readonly type: 'context.closed' };
+
 export type AudioAssetCacheTelemetryEvent =
   | { readonly type: 'asset.fetch-failed'; readonly url: string }
   | { readonly type: 'asset.decode-failed'; readonly url: string }

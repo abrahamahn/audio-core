@@ -11,6 +11,7 @@ import {
   emitAudioTelemetry,
   type AudioOutputSourceKind,
   type AudioOutputTelemetryEvent,
+  type AudioStreamTelemetryEvent,
   type AudioTelemetrySink,
 } from './telemetry.js';
 
@@ -382,10 +383,13 @@ export class WebAudioOutput<Channel extends string> {
 }
 
 export interface WebAudioStreamControllerOptions<Channel extends string>
-  extends WebAudioOutputOptions<Channel> {
+  extends Omit<WebAudioOutputOptions<Channel>, 'telemetry'> {
   readonly channel: Channel;
   readonly defaultCrossfadeMs?: number;
   readonly readyTimeoutMs?: number;
+  readonly telemetry?: AudioTelemetrySink<
+    AudioOutputTelemetryEvent<Channel> | AudioStreamTelemetryEvent<Channel>
+  >;
 }
 
 export interface WebAudioStreamReplaceOptions {
@@ -412,6 +416,9 @@ export class WebAudioStreamController<Channel extends string> {
   readonly #channel: Channel;
   readonly #defaultCrossfadeMs: number;
   readonly #readyTimeoutMs: number;
+  readonly #telemetry:
+    | AudioTelemetrySink<AudioOutputTelemetryEvent<Channel> | AudioStreamTelemetryEvent<Channel>>
+    | undefined;
   readonly #pending = new Map<HTMLMediaElement, PendingStream<Channel>>();
   #replacementQueue: Promise<void> = Promise.resolve();
   #readinessAbort: AbortController | null = null;
@@ -421,6 +428,7 @@ export class WebAudioStreamController<Channel extends string> {
 
   constructor(context: AudioContext, options: WebAudioStreamControllerOptions<Channel>) {
     this.#channel = options.channel;
+    this.#telemetry = options.telemetry;
     this.#defaultCrossfadeMs = nonNegative(options.defaultCrossfadeMs ?? 0, 'defaultCrossfadeMs');
     this.#readyTimeoutMs = nonNegative(options.readyTimeoutMs ?? 10_000, 'readyTimeoutMs');
     this.#output = new WebAudioOutput(
@@ -469,13 +477,15 @@ export class WebAudioStreamController<Channel extends string> {
     readyTimeoutMs: number,
     autoplay: boolean,
   ): Promise<boolean> {
-    if (this.#disposed) return false;
+    if (this.#disposed) return this.#replaceFailed('disposed');
     if (this.#current?.element === element) {
       this.#current.connection.setLevel(level, crossfadeMs);
       if (!autoplay) return true;
       const started = await playMedia(element);
       if (started && this.#hasBeenDisposed()) element.pause();
-      return started && !this.#hasBeenDisposed();
+      if (!started) return this.#replaceFailed('autoplay');
+      if (this.#hasBeenDisposed()) return this.#replaceFailed('disposed');
+      return true;
     }
 
     this.#cancelPending(element);
@@ -484,24 +494,30 @@ export class WebAudioStreamController<Channel extends string> {
     this.#readinessAbort = readinessAbort;
     const ready = await waitForMedia(element, readyTimeoutMs, readinessAbort.signal);
     if (this.#readinessAbort === readinessAbort) this.#readinessAbort = null;
-    if (!ready || this.#hasBeenDisposed()) return false;
+    if (!ready) return this.#replaceFailed(this.#hasBeenDisposed() ? 'disposed' : 'not-ready');
+    if (this.#hasBeenDisposed()) return this.#replaceFailed('disposed');
     const initialLevel = previous === null || crossfadeMs === 0 ? level : 0;
     const connection = this.#output.connectMediaElement(element, {
       channel: this.#channel,
       level: initialLevel,
     });
-    if (connection === null) return false;
+    if (connection === null) return this.#replaceFailed('capacity');
     if (autoplay) {
       const started = await playMedia(element);
       if (!started || this.#hasBeenDisposed()) {
         connection.disconnect();
         if (started) element.pause();
-        return false;
+        return this.#replaceFailed(this.#hasBeenDisposed() ? 'disposed' : 'autoplay');
       }
     }
 
     this.#current = { element, connection, level };
     this.#resumeAfterVisibility = false;
+    emitAudioTelemetry(this.#telemetry, {
+      type: 'stream.replaced',
+      channel: this.#channel,
+      crossfadeMs: previous === null ? 0 : crossfadeMs,
+    });
     if (previous === null) return true;
     if (crossfadeMs === 0) {
       previous.connection.disconnect();
@@ -529,6 +545,7 @@ export class WebAudioStreamController<Channel extends string> {
     if (element === undefined) return;
     this.#resumeAfterVisibility ||= !element.paused;
     element.pause();
+    emitAudioTelemetry(this.#telemetry, { type: 'stream.suspended', channel: this.#channel });
   }
 
   async resume(): Promise<boolean> {
@@ -540,7 +557,15 @@ export class WebAudioStreamController<Channel extends string> {
       if (resumed && this.#hasBeenDisposed()) element.pause();
       return false;
     }
-    if (resumed) this.#resumeAfterVisibility = false;
+    if (resumed) {
+      this.#resumeAfterVisibility = false;
+      emitAudioTelemetry(this.#telemetry, { type: 'stream.resumed', channel: this.#channel });
+    } else {
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'stream.resume-failed',
+        channel: this.#channel,
+      });
+    }
     return resumed;
   }
 
@@ -583,6 +608,20 @@ export class WebAudioStreamController<Channel extends string> {
 
   #hasBeenDisposed(): boolean {
     return this.#disposed;
+  }
+
+  #replaceFailed(
+    reason: Extract<
+      AudioStreamTelemetryEvent<Channel>,
+      { type: 'stream.replace-failed' }
+    >['reason'],
+  ): false {
+    emitAudioTelemetry(this.#telemetry, {
+      type: 'stream.replace-failed',
+      channel: this.#channel,
+      reason,
+    });
+    return false;
   }
 }
 

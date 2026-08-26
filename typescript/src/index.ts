@@ -37,9 +37,11 @@ export {
 export {
   emitAudioTelemetry,
   type AudioAssetCacheTelemetryEvent,
+  type AudioContextTelemetryEvent,
   type AudioCueRuntimeTelemetryEvent,
   type AudioOutputSourceKind,
   type AudioOutputTelemetryEvent,
+  type AudioStreamTelemetryEvent,
   type AudioTelemetrySink,
 } from './telemetry.js';
 export {
