@@ -1,12 +1,15 @@
 # @abrahamahn/audio-core
 
 The TypeScript implementation of [`audio-core`](https://github.com/abrahamahn/audio-core):
-framework-neutral cue planning, replay deduplication, spatial/mix policy, context lifecycle,
-bounded injected asset caching, and optional Web Audio output topology with ducking and limiting.
+framework-neutral cue/sequence planning, replay deduplication, active-voice cancellation,
+spatial/mix and preference policy, manifest-driven asset selection, context lifecycle, bounded
+injected asset caching, and optional Web Audio output topology with stream replacement, ducking,
+limiting, and failure-isolated telemetry contracts.
 
 The root entrypoint does not create an `AudioContext`, read browser storage, fetch a fixed asset, or
 define application cue names. The `./web-audio` entrypoint routes caller-owned streams and decoded
-buffers through either one replaceable channel or named simultaneous channels under a master bus.
+buffers through either one replaceable channel or named simultaneous channels under a master bus;
+its stream controller serializes readiness-aware replacements and optional crossfades.
 
 ```ts
 import {

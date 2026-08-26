@@ -12,3 +12,8 @@
 - Add a Web Audio adapter with replaceable single-channel streaming and bounded multi-channel
   voices mixed through one master bus.
 - Add validated final-limiter configuration and explicit channel ducking envelopes.
+- Add ordered cue-sequence planning and renderer-neutral active-voice cancellation.
+- Add serialized, readiness-aware media stream replacement with crossfades and visibility recovery.
+- Add validated asset manifests, capability-aware variants, and decode/stream selection policy.
+- Add storage-neutral preference normalization and effective-level calculation.
+- Add typed, failure-isolated telemetry contracts without imposing a telemetry backend.

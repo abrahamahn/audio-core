@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioOutputTopology } from '../src/output.js';
-import { WebAudioOutput } from '../src/web-audio.js';
+import type { AudioOutputTelemetryEvent } from '../src/telemetry.js';
+import { WebAudioOutput, WebAudioStreamController } from '../src/web-audio.js';
 
 class FakeAudioParam {
   value = 0;
@@ -96,12 +97,43 @@ class FakeAudioContext {
   }
 }
 
+class FakeMediaElement {
+  paused = true;
+  readyState = 4;
+  readonly #listeners = new Map<string, Set<() => void>>();
+  readonly play = vi.fn(() => {
+    this.paused = false;
+    return Promise.resolve();
+  });
+  readonly pause = vi.fn(() => {
+    this.paused = true;
+  });
+
+  addEventListener(type: string, listener: () => void): void {
+    const listeners = this.#listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.#listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    this.#listeners.get(type)?.delete(listener);
+  }
+
+  emit(type: string): void {
+    for (const listener of this.#listeners.get(type) ?? []) listener();
+  }
+}
+
 function audioContext(fake: FakeAudioContext): AudioContext {
   return fake as unknown as AudioContext;
 }
 
 function audioNode(fake: FakeAudioNode): AudioNode {
   return fake as unknown as AudioNode;
+}
+
+function mediaElement(fake: FakeMediaElement): HTMLMediaElement {
+  return fake as unknown as HTMLMediaElement;
 }
 
 describe('WebAudioOutput single-channel mode', () => {
@@ -166,6 +198,54 @@ describe('WebAudioOutput single-channel mode', () => {
 });
 
 describe('WebAudioOutput multi-channel mode', () => {
+  it('reports voice, capacity, and ducking lifecycle without owning telemetry transport', () => {
+    const context = new FakeAudioContext();
+    const events: AudioOutputTelemetryEvent<'effects'>[] = [];
+    const output = new WebAudioOutput(
+      audioContext(context),
+      {
+        mode: 'multi-channel',
+        channels: { effects: { maxVoices: 1, overflow: 'reject-new' } },
+      },
+      { telemetry: (event) => events.push(event) },
+    );
+    const first = output.connectNode(audioNode(new FakeAudioNode()), { channel: 'effects' });
+    const rejected = output.playBuffer({} as AudioBuffer, { channel: 'effects' });
+    output.duck([{ channel: 'effects', level: 0.5 }], {
+      attackMs: 0,
+      holdMs: 10,
+      releaseMs: 10,
+    });
+    first?.disconnect();
+
+    expect(rejected).toBeNull();
+    expect(events).toEqual([
+      {
+        type: 'output.voice-started',
+        atMs: 10_000,
+        channel: 'effects',
+        source: 'node',
+        activeVoices: 1,
+      },
+      {
+        type: 'output.voice-dropped',
+        atMs: 10_000,
+        channel: 'effects',
+        source: 'buffer',
+        reason: 'capacity',
+        activeVoices: 1,
+      },
+      { type: 'output.duck', atMs: 10_000, channels: ['effects'] },
+      {
+        type: 'output.voice-stopped',
+        atMs: 10_000,
+        channel: 'effects',
+        source: 'node',
+        activeVoices: 0,
+      },
+    ]);
+  });
+
   it('supports a final limiter and priority-style channel ducking', () => {
     const context = new FakeAudioContext();
     const output = new WebAudioOutput(
@@ -285,5 +365,129 @@ describe('WebAudioOutput multi-channel mode', () => {
     expect(() => {
       output.setMasterLevel(1);
     }).toThrow(/disposed/u);
+  });
+});
+
+describe('WebAudioStreamController', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('crossfades replacements and recovers playback across visibility changes', async () => {
+    vi.useFakeTimers();
+    const context = new FakeAudioContext();
+    const controller = new WebAudioStreamController(audioContext(context), {
+      channel: 'music',
+      defaultCrossfadeMs: 200,
+    });
+    const first = new FakeMediaElement();
+    const second = new FakeMediaElement();
+
+    await expect(controller.replace(mediaElement(first))).resolves.toBe(true);
+    await expect(controller.replace(mediaElement(second))).resolves.toBe(true);
+    expect(controller.currentElement).toBe(mediaElement(second));
+    expect(controller.output.activeVoiceCount('music')).toBe(2);
+    expect(first.pause).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(first.pause).toHaveBeenCalledOnce();
+    expect(controller.output.activeVoiceCount('music')).toBe(1);
+
+    await controller.setVisibility('hidden');
+    await controller.setVisibility('hidden');
+    expect(second.paused).toBe(true);
+    await expect(controller.setVisibility('visible')).resolves.toBe(true);
+    expect(second.paused).toBe(false);
+    expect(second.play).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
+
+  it('serializes concurrent replacements in caller order', async () => {
+    const context = new FakeAudioContext();
+    const controller = new WebAudioStreamController(audioContext(context), {
+      channel: 'music',
+    });
+    const first = new FakeMediaElement();
+    const second = new FakeMediaElement();
+    let finishFirst: (() => void) | undefined;
+    first.play.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = () => {
+            first.paused = false;
+            resolve();
+          };
+        }),
+    );
+
+    const firstReplacement = controller.replace(mediaElement(first));
+    const secondReplacement = controller.replace(mediaElement(second));
+    await vi.waitFor(() => {
+      expect(finishFirst).toBeTypeOf('function');
+    });
+    expect(second.play).not.toHaveBeenCalled();
+    finishFirst?.();
+
+    await expect(firstReplacement).resolves.toBe(true);
+    await expect(secondReplacement).resolves.toBe(true);
+    expect(controller.currentElement).toBe(mediaElement(second));
+    expect(first.pause).toHaveBeenCalledOnce();
+    controller.dispose();
+  });
+
+  it('keeps the current stream when replacement autoplay fails', async () => {
+    const context = new FakeAudioContext();
+    const controller = new WebAudioStreamController(audioContext(context), {
+      channel: 'music',
+    });
+    const current = new FakeMediaElement();
+    const failed = new FakeMediaElement();
+    failed.play.mockRejectedValueOnce(new Error('autoplay denied'));
+
+    await expect(controller.replace(mediaElement(current))).resolves.toBe(true);
+    await expect(controller.replace(mediaElement(failed))).resolves.toBe(false);
+    expect(controller.currentElement).toBe(mediaElement(current));
+    expect(controller.output.activeVoiceCount('music')).toBe(1);
+    expect(current.pause).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('waits for buffering and leaves the current stream intact on timeout', async () => {
+    vi.useFakeTimers();
+    const context = new FakeAudioContext();
+    const controller = new WebAudioStreamController(audioContext(context), {
+      channel: 'music',
+      readyTimeoutMs: 100,
+    });
+    const current = new FakeMediaElement();
+    const buffering = new FakeMediaElement();
+    buffering.readyState = 0;
+
+    await controller.replace(mediaElement(current));
+    const replacement = controller.replace(mediaElement(buffering));
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(replacement).resolves.toBe(false);
+    expect(controller.currentElement).toBe(mediaElement(current));
+    expect(buffering.play).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('cancels a pending readiness wait when disposed', async () => {
+    vi.useFakeTimers();
+    const context = new FakeAudioContext();
+    const controller = new WebAudioStreamController(audioContext(context), {
+      channel: 'music',
+      readyTimeoutMs: 10_000,
+    });
+    const buffering = new FakeMediaElement();
+    buffering.readyState = 0;
+
+    const replacement = controller.replace(mediaElement(buffering));
+    await Promise.resolve();
+    await Promise.resolve();
+    controller.dispose();
+
+    await expect(replacement).resolves.toBe(false);
+    expect(buffering.play).not.toHaveBeenCalled();
   });
 });

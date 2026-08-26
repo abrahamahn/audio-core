@@ -2,9 +2,11 @@
 
 `audio-core` provides deterministic semantic-audio primitives for browser and interactive
 applications. It owns typed cue intent, absolute/relative timing, replay deduplication, lateness and
-cancellation decisions, context lifecycle recovery, normalized level/pan calculations, browser
-activation/visibility gates, bounded encoded/decoded asset caching, and an optional Web Audio
-single/multi-channel output adapter with explicit ducking and limiter policy.
+cancellation decisions, ordered cue sequences, renderer-neutral active-voice tracking, context
+lifecycle recovery, normalized level/pan calculations, browser activation/visibility gates,
+preference normalization, asset-manifest selection, bounded encoded/decoded asset caching, and an
+optional Web Audio single/multi-channel output adapter with explicit stream replacement, ducking,
+limiter policy, and failure-isolated telemetry hooks.
 
 - [`typescript/`](typescript/) — npm package `@abrahamahn/audio-core`
 
@@ -44,9 +46,13 @@ domain event → application cue mapping → AudioCueRequest
 
 - Cue timing and throttling depend only on caller-supplied time.
 - Planned cue commits remember bounded event identities so replayed events can be dropped.
+- Renderer-unavailable cues do not consume event identities or throttling windows.
 - Late, cancelled, duplicate, and rate-limited cues produce explicit decisions.
 - Cancellation groups remain closed until explicitly reopened or reset.
+- Runtime group cancellation stops and untracks every active renderer voice in that group.
 - Level and pan helpers always return bounded finite values.
+- Preference normalization accepts only an explicit application-owned channel vocabulary.
+- Asset selection preserves declared fallback order and rejects malformed manifest metadata.
 - Concurrent requests share encoded downloads and per-context decoded work.
 - Encoded and per-context decoded caches have explicit, bounded capacities.
 - Failed fetch/decode attempts are retryable rather than cached forever.
@@ -55,6 +61,9 @@ domain event → application cue mapping → AudioCueRequest
 - Context creation is activation-gated and concurrent resume attempts are coalesced.
 - Single-channel mode replaces the previous tracked stream/voice instead of stacking it.
 - Multi-channel mode enforces explicit per-channel voice bounds under one master bus.
+- Stream replacements execute in caller order and wait for readiness before replacing current audio.
+- Disposing a stream controller aborts pending readiness work and tears down tracked routes.
+- Telemetry sinks cannot throw into or alter the playback path.
 - Ducking envelopes restore each channel to its current configured base level.
 - Limiter parameters are checked against Web Audio's defined value ranges.
 - The root module performs no global fetch, decode, clock, storage, DOM, or output operation.
@@ -65,12 +74,15 @@ domain event → application cue mapping → AudioCueRequest
 import {
   AudioAssetCache,
   AudioContextLifecycle,
+  AudioCueRuntime,
   CueScheduler,
   gainForVolume,
+  planAudioSequence,
 } from '@abrahamahn/audio-core';
 
 type Cue = 'message' | 'warning';
 const scheduler = new CueScheduler<Cue>({ defaultMinGapMs: 80, maxLateByMs: 500 });
+const runtime = new AudioCueRuntime(scheduler);
 const receivedAtMs = performance.now();
 const planned = scheduler.plan(
   {
@@ -88,6 +100,13 @@ if (decision.status === 'ready') {
   const gain = gainForVolume(60);
   // Pass the cue and gain to an application-owned renderer.
 }
+
+const sequence = planAudioSequence(
+  scheduler,
+  [{ request: { cue: 'message', bus: 'ui', priority: 'normal' }, offsetMs: 0 }],
+  receivedAtMs,
+);
+runtime.dispatch(sequence[0]!, receivedAtMs, (request) => applicationRenderer.play(request));
 
 const lifecycle = new AudioContextLifecycle({
   createContext: () => new AudioContext(),
@@ -133,6 +152,10 @@ gameOutput.duck([{ channel: 'music', level: 0.35 }], {
 });
 ```
 
+`WebAudioStreamController`, available from the same `./web-audio` entrypoint, provides serialized,
+readiness-aware replacement and optional crossfades for one logical music or radio stream. Media
+elements and their URLs remain caller-owned.
+
 ## Extension points
 
 `AudioAssetCache` accepts any object-shaped decode context and any decoded result type.
@@ -142,10 +165,9 @@ one context. `AudioCueRequest` is generic over the application cue vocabulary.
 
 ## Deliberate next-stage work
 
-The initial extraction does not claim to be the complete future audio engine. Asset-manifest
-selection, adaptive streaming policy, telemetry, and an optional Babylon spatial adapter should be
-added only with real consumers and browser parity tests. They should not be simulated in Rust or
-hidden inside product-specific synthesis.
+The initial extraction does not claim to be the complete future audio engine. Adaptive streaming
+and an optional Babylon spatial adapter should be added only with real consumers and browser
+parity tests. They should not be simulated in Rust or hidden inside product-specific synthesis.
 
 ## Development
 

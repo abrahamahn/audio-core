@@ -9,9 +9,25 @@ import {
   gainForVolume,
   panForSeat,
   panForTablePosition,
+  emitAudioTelemetry,
   visibilityAllowsSound,
   type AudioCueRequest,
 } from '../src/index.js';
+
+describe('audio telemetry', () => {
+  it('is best effort and cannot change playback behavior', () => {
+    const events: string[] = [];
+    emitAudioTelemetry((event: string) => {
+      events.push(event);
+    }, 'started');
+    expect(events).toEqual(['started']);
+    expect(() => {
+      emitAudioTelemetry(() => {
+        throw new Error('telemetry unavailable');
+      }, 'started');
+    }).not.toThrow();
+  });
+});
 
 describe('audio policy', () => {
   it('uses a perceptual gain curve and restrained seat pan', () => {
@@ -73,6 +89,36 @@ describe('CueScheduler', () => {
 });
 
 describe('AudioAssetCache', () => {
+  it('reports failures and bounded-cache evictions without making telemetry authoritative', async () => {
+    const eventTypes: string[] = [];
+    const cache = new AudioAssetCache({
+      fetchEncoded: (url: string) =>
+        Promise.resolve(url === 'missing' ? null : new ArrayBuffer(url === 'bad' ? 1 : 2)),
+      decode: (_context: object, bytes: ArrayBuffer) =>
+        bytes.byteLength === 1 ? Promise.reject(new Error('codec')) : Promise.resolve(bytes),
+      maxEncodedEntries: 1,
+      maxDecodedEntriesPerContext: 1,
+      telemetry: (event) => eventTypes.push(event.type),
+    });
+    const context = {};
+
+    await cache.loadFirst(context, ['missing']);
+    await cache.loadFirst(context, ['bad', 'good']);
+    await cache.loadFirst(context, ['other']);
+    expect(eventTypes).toContain('asset.fetch-failed');
+    expect(eventTypes).toContain('asset.decode-failed');
+    expect(eventTypes.filter((type) => type === 'asset.cache-evicted').length).toBeGreaterThan(0);
+
+    const failureSafe = new AudioAssetCache({
+      fetchEncoded: () => Promise.resolve<ArrayBuffer | null>(null),
+      decode: (_context: object, bytes: ArrayBuffer) => Promise.resolve(bytes),
+      telemetry: () => {
+        throw new Error('collector offline');
+      },
+    });
+    await expect(failureSafe.preload('missing')).resolves.toBeNull();
+  });
+
   it('shares encoded bytes and decoded results while falling back by variant', async () => {
     const fetchEncoded = vi.fn((url: string) =>
       Promise.resolve(url.endsWith('.bad') ? new ArrayBuffer(1) : new ArrayBuffer(2)),

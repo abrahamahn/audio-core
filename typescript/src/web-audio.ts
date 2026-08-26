@@ -7,12 +7,19 @@ import {
   type AudioVoiceOverflowPolicy,
 } from './output.js';
 import { clampAudioLevel, clampPan } from './policy.js';
+import {
+  emitAudioTelemetry,
+  type AudioOutputSourceKind,
+  type AudioOutputTelemetryEvent,
+  type AudioTelemetrySink,
+} from './telemetry.js';
 
-export interface WebAudioOutputOptions {
+export interface WebAudioOutputOptions<Channel extends string = string> {
   readonly destination?: AudioNode;
   readonly masterLevel?: number;
   /** Optional final dynamics stage between MASTER and destination. */
   readonly limiter?: false | AudioLimiterConfig;
+  readonly telemetry?: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>>;
 }
 
 export interface WebAudioRouteOptions<Channel extends string> {
@@ -32,6 +39,7 @@ export interface WebAudioBufferPlayOptions<Channel extends string>
 
 export interface AudioOutputConnection<Channel extends string> {
   readonly channel: Channel;
+  setLevel(level: number, rampMs?: number): void;
   disconnect(): void;
 }
 
@@ -66,6 +74,7 @@ export class WebAudioOutput<Channel extends string> {
   readonly #context: AudioContext;
   readonly #master: GainNode;
   readonly #limiter: DynamicsCompressorNode | null;
+  readonly #telemetry: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>> | undefined;
   readonly #channels = new Map<Channel, ChannelState>();
   readonly #mediaSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
   #disposed = false;
@@ -73,10 +82,11 @@ export class WebAudioOutput<Channel extends string> {
   constructor(
     context: AudioContext,
     topology: AudioOutputTopology<Channel>,
-    options: WebAudioOutputOptions = {},
+    options: WebAudioOutputOptions<Channel> = {},
   ) {
     const channels = resolveChannels(topology);
     this.#context = context;
+    this.#telemetry = options.telemetry;
     this.#master = context.createGain();
     this.#master.gain.value = clampAudioLevel(options.masterLevel ?? 1);
     const destination = options.destination ?? context.destination;
@@ -136,6 +146,11 @@ export class WebAudioOutput<Channel extends string> {
       gain.setValueAtTime(level, recoverAt);
       gain.linearRampToValueAtTime(state.baseLevel, recoverAt + releaseSeconds);
     }
+    emitAudioTelemetry(this.#telemetry, {
+      type: 'output.duck',
+      atMs: now * 1_000,
+      channels: targets.map(({ channel }) => channel),
+    });
   }
 
   activeVoiceCount(channel: Channel): number {
@@ -147,7 +162,7 @@ export class WebAudioOutput<Channel extends string> {
     source: AudioNode,
     options: WebAudioRouteOptions<Channel>,
   ): AudioOutputConnection<Channel> | null {
-    return this.#connectSource(source, options);
+    return this.#connectSource(source, options, 'node');
   }
 
   /** Create or reuse a MediaElement source. The caller retains play/pause and URL ownership. */
@@ -161,7 +176,7 @@ export class WebAudioOutput<Channel extends string> {
       source = this.#context.createMediaElementSource(element);
       this.#mediaSources.set(element, source);
     }
-    return this.#connectSource(source, options);
+    return this.#connectSource(source, options, 'stream');
   }
 
   /** Create and start one buffer voice. Repeated calls can play concurrently within channel policy. */
@@ -186,7 +201,7 @@ export class WebAudioOutput<Channel extends string> {
     if (options.playbackRate !== undefined) source.playbackRate.value = options.playbackRate;
 
     let ended = false;
-    const connection = this.#connectSource(source, options, () => {
+    const connection = this.#connectSource(source, options, 'buffer', () => {
       if (ended) return;
       try {
         source.stop();
@@ -212,6 +227,9 @@ export class WebAudioOutput<Channel extends string> {
     return {
       channel: options.channel,
       source,
+      setLevel: (level, rampMs) => {
+        connection.setLevel(level, rampMs);
+      },
       disconnect: () => {
         connection.disconnect();
       },
@@ -256,6 +274,7 @@ export class WebAudioOutput<Channel extends string> {
   #connectSource(
     source: AudioNode,
     options: WebAudioRouteOptions<Channel>,
+    sourceKind: AudioOutputSourceKind,
     terminateSource?: () => void,
   ): AudioOutputConnection<Channel> | null {
     this.#assertActive();
@@ -268,8 +287,18 @@ export class WebAudioOutput<Channel extends string> {
         : null;
     if (panner !== null) panner.pan.value = clampPan(options.pan ?? 0);
 
+    const setLevel = (level: number, rampMs = 0): void => {
+      const rampSeconds = milliseconds(rampMs, 'rampMs');
+      const now = this.#context.currentTime;
+      trim.gain.cancelScheduledValues(now);
+      trim.gain.setValueAtTime(trim.gain.value, now);
+      if (rampSeconds === 0) trim.gain.setValueAtTime(clampAudioLevel(level), now);
+      else trim.gain.linearRampToValueAtTime(clampAudioLevel(level), now + rampSeconds);
+    };
+
     let admitted = false;
     let connected = false;
+    let started = false;
     const disconnect = (): void => {
       if (!admitted) return;
       admitted = false;
@@ -284,9 +313,29 @@ export class WebAudioOutput<Channel extends string> {
       }
       trim.disconnect();
       panner?.disconnect();
+      if (started) {
+        started = false;
+        emitAudioTelemetry(this.#telemetry, {
+          type: 'output.voice-stopped',
+          atMs: this.#context.currentTime * 1_000,
+          channel: options.channel,
+          source: sourceKind,
+          activeVoices: state.active.size,
+        });
+      }
     };
     const slot: ActiveSlot = { terminate: disconnect };
-    if (!this.#admit(state, slot)) return null;
+    if (!this.#admit(state, slot)) {
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'output.voice-dropped',
+        atMs: this.#context.currentTime * 1_000,
+        channel: options.channel,
+        source: sourceKind,
+        reason: 'capacity',
+        activeVoices: state.active.size,
+      });
+      return null;
+    }
     admitted = true;
 
     try {
@@ -297,11 +346,19 @@ export class WebAudioOutput<Channel extends string> {
         panner.connect(state.input);
       }
       connected = true;
+      started = true;
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'output.voice-started',
+        atMs: this.#context.currentTime * 1_000,
+        channel: options.channel,
+        source: sourceKind,
+        activeVoices: state.active.size,
+      });
     } catch (error) {
       disconnect();
       throw error;
     }
-    return { channel: options.channel, disconnect };
+    return { channel: options.channel, setLevel, disconnect };
   }
 
   #admit(state: ChannelState, slot: ActiveSlot): boolean {
@@ -322,6 +379,256 @@ export class WebAudioOutput<Channel extends string> {
   #assertActive(): void {
     if (this.#disposed) throw new Error('audio output is disposed');
   }
+}
+
+export interface WebAudioStreamControllerOptions<Channel extends string>
+  extends WebAudioOutputOptions<Channel> {
+  readonly channel: Channel;
+  readonly defaultCrossfadeMs?: number;
+  readonly readyTimeoutMs?: number;
+}
+
+export interface WebAudioStreamReplaceOptions {
+  readonly autoplay?: boolean;
+  readonly crossfadeMs?: number;
+  readonly level?: number;
+  readonly readyTimeoutMs?: number;
+}
+
+interface ActiveStream<Channel extends string> {
+  readonly element: HTMLMediaElement;
+  readonly connection: AudioOutputConnection<Channel>;
+  readonly level: number;
+}
+
+interface PendingStream<Channel extends string> {
+  readonly timer: number;
+  readonly connection: AudioOutputConnection<Channel>;
+}
+
+/** Owns one logical music/radio stream with safe replacement and optional crossfade overlap. */
+export class WebAudioStreamController<Channel extends string> {
+  readonly #output: WebAudioOutput<Channel>;
+  readonly #channel: Channel;
+  readonly #defaultCrossfadeMs: number;
+  readonly #readyTimeoutMs: number;
+  readonly #pending = new Map<HTMLMediaElement, PendingStream<Channel>>();
+  #replacementQueue: Promise<void> = Promise.resolve();
+  #readinessAbort: AbortController | null = null;
+  #current: ActiveStream<Channel> | null = null;
+  #resumeAfterVisibility = false;
+  #disposed = false;
+
+  constructor(context: AudioContext, options: WebAudioStreamControllerOptions<Channel>) {
+    this.#channel = options.channel;
+    this.#defaultCrossfadeMs = nonNegative(options.defaultCrossfadeMs ?? 0, 'defaultCrossfadeMs');
+    this.#readyTimeoutMs = nonNegative(options.readyTimeoutMs ?? 10_000, 'readyTimeoutMs');
+    this.#output = new WebAudioOutput(
+      context,
+      {
+        mode: 'multi-channel',
+        channels: {
+          [options.channel]: { maxVoices: 2, overflow: 'stop-oldest' },
+        } as Record<Channel, AudioOutputChannelConfig>,
+      },
+      options,
+    );
+  }
+
+  get output(): WebAudioOutput<Channel> {
+    return this.#output;
+  }
+
+  get currentElement(): HTMLMediaElement | null {
+    return this.#current?.element ?? null;
+  }
+
+  replace(element: HTMLMediaElement, options: WebAudioStreamReplaceOptions = {}): Promise<boolean> {
+    this.#assertActive();
+    const level = clampAudioLevel(options.level ?? 1);
+    const crossfadeMs = nonNegative(options.crossfadeMs ?? this.#defaultCrossfadeMs, 'crossfadeMs');
+    const readyTimeoutMs = nonNegative(
+      options.readyTimeoutMs ?? this.#readyTimeoutMs,
+      'readyTimeoutMs',
+    );
+    const autoplay = options.autoplay ?? true;
+    const replacement = this.#replacementQueue.then(() =>
+      this.#replaceNow(element, level, crossfadeMs, readyTimeoutMs, autoplay),
+    );
+    this.#replacementQueue = replacement.then(
+      () => undefined,
+      () => undefined,
+    );
+    return replacement;
+  }
+
+  async #replaceNow(
+    element: HTMLMediaElement,
+    level: number,
+    crossfadeMs: number,
+    readyTimeoutMs: number,
+    autoplay: boolean,
+  ): Promise<boolean> {
+    if (this.#disposed) return false;
+    if (this.#current?.element === element) {
+      this.#current.connection.setLevel(level, crossfadeMs);
+      if (!autoplay) return true;
+      const started = await playMedia(element);
+      if (started && this.#hasBeenDisposed()) element.pause();
+      return started && !this.#hasBeenDisposed();
+    }
+
+    this.#cancelPending(element);
+    const previous = this.#current;
+    const readinessAbort = new AbortController();
+    this.#readinessAbort = readinessAbort;
+    const ready = await waitForMedia(element, readyTimeoutMs, readinessAbort.signal);
+    if (this.#readinessAbort === readinessAbort) this.#readinessAbort = null;
+    if (!ready || this.#hasBeenDisposed()) return false;
+    const initialLevel = previous === null || crossfadeMs === 0 ? level : 0;
+    const connection = this.#output.connectMediaElement(element, {
+      channel: this.#channel,
+      level: initialLevel,
+    });
+    if (connection === null) return false;
+    if (autoplay) {
+      const started = await playMedia(element);
+      if (!started || this.#hasBeenDisposed()) {
+        connection.disconnect();
+        if (started) element.pause();
+        return false;
+      }
+    }
+
+    this.#current = { element, connection, level };
+    this.#resumeAfterVisibility = false;
+    if (previous === null) return true;
+    if (crossfadeMs === 0) {
+      previous.connection.disconnect();
+      previous.element.pause();
+      return true;
+    }
+
+    connection.setLevel(level, crossfadeMs);
+    previous.connection.setLevel(0, crossfadeMs);
+    const timer = globalThis.setTimeout(() => {
+      this.#pending.delete(previous.element);
+      previous.connection.disconnect();
+      if (this.#current?.element !== previous.element) previous.element.pause();
+    }, crossfadeMs);
+    this.#pending.set(previous.element, {
+      timer,
+      connection: previous.connection,
+    });
+    return true;
+  }
+
+  suspend(): void {
+    this.#assertActive();
+    const element = this.#current?.element;
+    if (element === undefined) return;
+    this.#resumeAfterVisibility ||= !element.paused;
+    element.pause();
+  }
+
+  async resume(): Promise<boolean> {
+    this.#assertActive();
+    const element = this.#current?.element;
+    if (element === undefined || !this.#resumeAfterVisibility) return true;
+    const resumed = await playMedia(element);
+    if (this.#hasBeenDisposed() || this.#current?.element !== element) {
+      if (resumed && this.#hasBeenDisposed()) element.pause();
+      return false;
+    }
+    if (resumed) this.#resumeAfterVisibility = false;
+    return resumed;
+  }
+
+  async setVisibility(visibilityState: string): Promise<boolean> {
+    if (visibilityState !== 'visible') {
+      this.suspend();
+      return true;
+    }
+    return this.resume();
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#readinessAbort?.abort();
+    this.#readinessAbort = null;
+    for (const [element, pending] of this.#pending) {
+      globalThis.clearTimeout(pending.timer);
+      pending.connection.disconnect();
+      element.pause();
+    }
+    this.#pending.clear();
+    this.#current?.connection.disconnect();
+    this.#current?.element.pause();
+    this.#current = null;
+    this.#output.dispose();
+  }
+
+  #cancelPending(element: HTMLMediaElement): void {
+    const pending = this.#pending.get(element);
+    if (pending === undefined) return;
+    globalThis.clearTimeout(pending.timer);
+    pending.connection.disconnect();
+    this.#pending.delete(element);
+  }
+
+  #assertActive(): void {
+    if (this.#disposed) throw new Error('audio stream controller is disposed');
+  }
+
+  #hasBeenDisposed(): boolean {
+    return this.#disposed;
+  }
+}
+
+async function playMedia(element: HTMLMediaElement): Promise<boolean> {
+  try {
+    await element.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForMedia(
+  element: HTMLMediaElement,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (element.readyState >= 3) return true;
+  if (timeoutMs === 0 || signal.aborted) return false;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean): void => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      element.removeEventListener('canplay', onCanPlay);
+      element.removeEventListener('error', onError);
+      signal.removeEventListener('abort', onAbort);
+      resolve(ready);
+    };
+    const onCanPlay = (): void => {
+      finish(true);
+    };
+    const onError = (): void => {
+      finish(false);
+    };
+    const onAbort = (): void => {
+      finish(false);
+    };
+    const timer = globalThis.setTimeout(() => {
+      finish(false);
+    }, timeoutMs);
+    element.addEventListener('canplay', onCanPlay, { once: true });
+    element.addEventListener('error', onError, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function resolveChannels<Channel extends string>(
@@ -396,9 +703,7 @@ function configureLimiter(node: DynamicsCompressorNode, config: AudioLimiterConf
 
 function bounded(value: number, minimum: number, maximum: number, name: string): number {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(
-      `${name} must be between ${String(minimum)} and ${String(maximum)}`,
-    );
+    throw new RangeError(`${name} must be between ${String(minimum)} and ${String(maximum)}`);
   }
   return value;
 }
@@ -413,4 +718,9 @@ function nonNegativeFinite(value: number, name: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be finite and non-negative`);
   }
+}
+
+function nonNegative(value: number, name: string): number {
+  nonNegativeFinite(value, name);
+  return value;
 }

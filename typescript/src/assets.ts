@@ -1,3 +1,9 @@
+import {
+  emitAudioTelemetry,
+  type AudioAssetCacheTelemetryEvent,
+  type AudioTelemetrySink,
+} from './telemetry.js';
+
 export interface AudioAssetCacheOptions<Context extends object, Decoded> {
   readonly fetchEncoded: (url: string) => Promise<ArrayBuffer | null>;
   readonly decode: (context: Context, bytes: ArrayBuffer) => Promise<Decoded>;
@@ -5,6 +11,7 @@ export interface AudioAssetCacheOptions<Context extends object, Decoded> {
   readonly maxEncodedEntries?: number;
   /** Maximum decoded candidate sets retained for one context. Defaults to 32. */
   readonly maxDecodedEntriesPerContext?: number;
+  readonly telemetry?: AudioTelemetrySink<AudioAssetCacheTelemetryEvent>;
 }
 
 export class AudioAssetCache<Context extends object, Decoded> {
@@ -12,12 +19,14 @@ export class AudioAssetCache<Context extends object, Decoded> {
   readonly #decode: AudioAssetCacheOptions<Context, Decoded>['decode'];
   readonly #maxEncodedEntries: number;
   readonly #maxDecodedEntriesPerContext: number;
+  readonly #telemetry: AudioTelemetrySink<AudioAssetCacheTelemetryEvent> | undefined;
   readonly #encoded = new Map<string, Promise<ArrayBuffer | null>>();
   #decoded = new WeakMap<Context, Map<string, Promise<Decoded | null>>>();
 
   constructor(options: AudioAssetCacheOptions<Context, Decoded>) {
     this.#fetchEncoded = options.fetchEncoded;
     this.#decode = options.decode;
+    this.#telemetry = options.telemetry;
     this.#maxEncodedEntries = positiveInteger(options.maxEncodedEntries ?? 64, 'maxEncodedEntries');
     this.#maxDecodedEntriesPerContext = positiveInteger(
       options.maxDecodedEntriesPerContext ?? 32,
@@ -31,9 +40,24 @@ export class AudioAssetCache<Context extends object, Decoded> {
       touch(this.#encoded, url, cached);
       return cached;
     }
-    const request = this.#fetchEncoded(url).catch(() => null);
+    const request = this.#fetchEncoded(url).then(
+      (bytes) => {
+        if (bytes === null) this.#emitFetchFailure(url);
+        return bytes;
+      },
+      () => {
+        this.#emitFetchFailure(url);
+        return null;
+      },
+    );
     this.#encoded.set(url, request);
-    evictOldest(this.#encoded, this.#maxEncodedEntries);
+    for (const key of evictOldest(this.#encoded, this.#maxEncodedEntries)) {
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'asset.cache-evicted',
+        cache: 'encoded',
+        key,
+      });
+    }
     void request.then((bytes) => {
       if (bytes === null && this.#encoded.get(url) === request) this.#encoded.delete(url);
     });
@@ -55,7 +79,13 @@ export class AudioAssetCache<Context extends object, Decoded> {
     }
     const request = this.#decodeFirst(context, candidates);
     contextCache.set(key, request);
-    evictOldest(contextCache, this.#maxDecodedEntriesPerContext);
+    for (const evictedKey of evictOldest(contextCache, this.#maxDecodedEntriesPerContext)) {
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'asset.cache-evicted',
+        cache: 'decoded',
+        key: evictedKey,
+      });
+    }
     void request.then((decoded) => {
       if (decoded === null && contextCache.get(key) === request) contextCache.delete(key);
     });
@@ -86,10 +116,15 @@ export class AudioAssetCache<Context extends object, Decoded> {
       try {
         return await this.#decode(context, bytes.slice(0));
       } catch {
+        emitAudioTelemetry(this.#telemetry, { type: 'asset.decode-failed', url });
         // A codec declaration may be optimistic; try the next immutable variant.
       }
     }
     return null;
+  }
+
+  #emitFetchFailure(url: string): void {
+    emitAudioTelemetry(this.#telemetry, { type: 'asset.fetch-failed', url });
   }
 }
 
@@ -105,10 +140,13 @@ function touch<Key, Value>(map: Map<Key, Value>, key: Key, value: Value): void {
   map.set(key, value);
 }
 
-function evictOldest<Key, Value>(map: Map<Key, Value>, maximumSize: number): void {
+function evictOldest<Key, Value>(map: Map<Key, Value>, maximumSize: number): Key[] {
+  const evicted: Key[] = [];
   while (map.size > maximumSize) {
     const oldest = map.keys().next().value;
-    if (oldest === undefined) return;
+    if (oldest === undefined) return evicted;
     map.delete(oldest);
+    evicted.push(oldest);
   }
+  return evicted;
 }
