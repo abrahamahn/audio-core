@@ -5,6 +5,9 @@ use std::error::Error;
 use std::f32::consts::PI;
 use std::fmt::{Display, Formatter};
 
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+mod wasm;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterKind {
     HighPass,
@@ -284,11 +287,19 @@ impl EffectChain {
 
     /// Enable or bypass one processor without rebuilding or allocating.
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
-        let Some(processor) = self
+        let Some(index) = self
             .processors
-            .iter_mut()
-            .find(|processor| processor.id == id)
+            .iter()
+            .position(|processor| processor.id == id)
         else {
+            return false;
+        };
+        self.set_enabled_at(index, enabled)
+    }
+
+    /// Enable or bypass one processor by stable chain position without rebuilding or allocating.
+    pub fn set_enabled_at(&mut self, index: usize, enabled: bool) -> bool {
+        let Some(processor) = self.processors.get_mut(index) else {
             return false;
         };
         processor.enabled = enabled;

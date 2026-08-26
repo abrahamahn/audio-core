@@ -15,7 +15,11 @@ import {
   type AudioStreamTelemetryEvent,
   type AudioTelemetrySink,
 } from './telemetry.js';
-import { WebAudioEffectChain } from './web-audio-effects.js';
+import {
+  WebAudioEffectChain,
+  type WebAudioEffectChainFactory,
+  type WebAudioEffectInsert,
+} from './web-audio-effects.js';
 
 export interface WebAudioOutputOptions<Channel extends string = string> {
   readonly destination?: AudioNode;
@@ -26,6 +30,8 @@ export interface WebAudioOutputOptions<Channel extends string = string> {
   readonly masterEffects?: readonly AudioEffectConfig[];
   /** Serial insert effects placed before an individual channel fader. */
   readonly channelEffects?: Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>;
+  /** Optional preloaded renderer for every configured effect chain. Native Web Audio is default. */
+  readonly effectChainFactory?: WebAudioEffectChainFactory | undefined;
   readonly telemetry?: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>>;
 }
 
@@ -35,8 +41,9 @@ export interface WebAudioRouteOptions<Channel extends string> {
   readonly pan?: number;
 }
 
-export interface WebAudioBufferPlayOptions<Channel extends string>
-  extends WebAudioRouteOptions<Channel> {
+export interface WebAudioBufferPlayOptions<
+  Channel extends string,
+> extends WebAudioRouteOptions<Channel> {
   readonly when?: number;
   readonly offset?: number;
   readonly duration?: number;
@@ -50,8 +57,9 @@ export interface AudioOutputConnection<Channel extends string> {
   disconnect(): void;
 }
 
-export interface WebAudioBufferVoice<Channel extends string>
-  extends AudioOutputConnection<Channel> {
+export interface WebAudioBufferVoice<
+  Channel extends string,
+> extends AudioOutputConnection<Channel> {
   readonly source: AudioBufferSourceNode;
   stop(): void;
 }
@@ -71,7 +79,7 @@ interface ChannelState {
   readonly input: GainNode;
   /** Pre-effect destination for newly routed voices. */
   readonly route: AudioNode;
-  readonly effects: WebAudioEffectChain | null;
+  readonly effects: WebAudioEffectInsert | null;
   readonly config: ResolvedChannelConfig;
   readonly active: Set<ActiveSlot>;
   baseLevel: number;
@@ -85,10 +93,11 @@ export class WebAudioOutput<Channel extends string> {
   readonly #context: AudioContext;
   readonly #master: GainNode;
   readonly #limiter: DynamicsCompressorNode | null;
-  readonly #masterEffects: WebAudioEffectChain | null;
+  readonly #masterEffects: WebAudioEffectInsert | null;
   readonly #channelEffectConfigs:
     | Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>
     | undefined;
+  readonly #effectChainFactory: WebAudioEffectChainFactory | undefined;
   readonly #telemetry: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>> | undefined;
   readonly #channels = new Map<Channel, ChannelState>();
   readonly #mediaSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
@@ -104,10 +113,15 @@ export class WebAudioOutput<Channel extends string> {
     this.#context = context;
     this.#telemetry = options.telemetry;
     this.#channelEffectConfigs = options.channelEffects;
+    this.#effectChainFactory = options.effectChainFactory;
     this.#master = context.createGain();
     this.#master.gain.value = clampAudioLevel(options.masterLevel ?? 1);
     const destination = options.destination ?? context.destination;
-    this.#masterEffects = createOptionalEffectChain(context, options.masterEffects);
+    this.#masterEffects = createOptionalEffectChain(
+      context,
+      options.masterEffects,
+      options.effectChainFactory,
+    );
     if (this.#masterEffects !== null) this.#masterEffects.outputNode.connect(this.#master);
     if (
       options.limiter !== undefined &&
@@ -133,10 +147,21 @@ export class WebAudioOutput<Channel extends string> {
   }
 
   get masterEffectChain(): WebAudioEffectChain | null {
+    return this.#masterEffects instanceof WebAudioEffectChain ? this.#masterEffects : null;
+  }
+
+  /** The active effect insert, including a Rust worklet insert when configured. */
+  get masterEffectInsert(): WebAudioEffectInsert | null {
     return this.#masterEffects;
   }
 
   channelEffectChain(channel: Channel): WebAudioEffectChain | null {
+    const effects = this.#channel(channel).effects;
+    return effects instanceof WebAudioEffectChain ? effects : null;
+  }
+
+  /** The channel effect insert, including a Rust worklet insert when configured. */
+  channelEffectInsert(channel: Channel): WebAudioEffectInsert | null {
     return this.#channel(channel).effects;
   }
 
@@ -291,7 +316,11 @@ export class WebAudioOutput<Channel extends string> {
   #addChannel(channel: Channel, config: ResolvedChannelConfig): void {
     const input = this.#context.createGain();
     input.gain.value = config.level;
-    const effects = createOptionalEffectChain(this.#context, this.#channelEffectConfigs?.[channel]);
+    const effects = createOptionalEffectChain(
+      this.#context,
+      this.#channelEffectConfigs?.[channel],
+      this.#effectChainFactory,
+    );
     const masterInput = this.#masterEffects?.inputNode ?? this.#master;
     if (effects === null) input.connect(masterInput);
     else {
@@ -421,10 +450,10 @@ export class WebAudioOutput<Channel extends string> {
 function createOptionalEffectChain(
   context: AudioContext,
   effects: readonly AudioEffectConfig[] | undefined,
-): WebAudioEffectChain | null {
-  return effects === undefined || effects.length === 0
-    ? null
-    : new WebAudioEffectChain(context, effects);
+  factory: WebAudioEffectChainFactory | undefined,
+): WebAudioEffectInsert | null {
+  if (effects === undefined || effects.length === 0) return null;
+  return factory?.create(context, effects) ?? new WebAudioEffectChain(context, effects);
 }
 
 function validateEffectOptions<Channel extends string>(
@@ -447,14 +476,18 @@ export {
   type WebAudioDelayEffectHandle,
   type WebAudioEffectHandle,
   type WebAudioEffectHandleBase,
+  type WebAudioEffectChainFactory,
+  type WebAudioEffectInsert,
   type WebAudioEqualizerEffectHandle,
   type WebAudioFilterEffectHandle,
   type WebAudioReverbEffectHandle,
   type WebAudioSaturationEffectHandle,
 } from './web-audio-effects.js';
 
-export interface WebAudioStreamControllerOptions<Channel extends string>
-  extends Omit<WebAudioOutputOptions<Channel>, 'telemetry'> {
+export interface WebAudioStreamControllerOptions<Channel extends string> extends Omit<
+  WebAudioOutputOptions<Channel>,
+  'telemetry'
+> {
   readonly channel: Channel;
   readonly defaultCrossfadeMs?: number;
   readonly readyTimeoutMs?: number;
@@ -616,7 +649,10 @@ export class WebAudioStreamController<Channel extends string> {
     if (element === undefined) return;
     this.#resumeAfterVisibility ||= !element.paused;
     element.pause();
-    emitAudioTelemetry(this.#telemetry, { type: 'stream.suspended', channel: this.#channel });
+    emitAudioTelemetry(this.#telemetry, {
+      type: 'stream.suspended',
+      channel: this.#channel,
+    });
   }
 
   async resume(): Promise<boolean> {
@@ -630,7 +666,10 @@ export class WebAudioStreamController<Channel extends string> {
     }
     if (resumed) {
       this.#resumeAfterVisibility = false;
-      emitAudioTelemetry(this.#telemetry, { type: 'stream.resumed', channel: this.#channel });
+      emitAudioTelemetry(this.#telemetry, {
+        type: 'stream.resumed',
+        channel: this.#channel,
+      });
     } else {
       emitAudioTelemetry(this.#telemetry, {
         type: 'stream.resume-failed',

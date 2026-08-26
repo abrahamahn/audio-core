@@ -28,6 +28,11 @@
       "source": "./src/web-audio-effects.ts",
       "types": "./dist/web-audio-effects.d.ts",
       "default": "./dist/web-audio-effects.js"
+    },
+    "./rust-audio-worklet": {
+      "source": "./src/rust-audio-worklet.ts",
+      "types": "./dist/rust-audio-worklet.d.ts",
+      "default": "./dist/rust-audio-worklet.js"
     }
   },
   "files": [
@@ -38,12 +43,15 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "check:worklet": "node --check scripts/build-wasm.mjs && node --check worklet/rust-effects-processor.js && node --check dist/audio-worklet/rust-effects-processor.js",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "type-check": "pnpm typecheck",
     "lint": "eslint src tests tests-browser --max-warnings 0",
     "test": "vitest run",
+    "pretest:browser": "pnpm build:wasm",
     "test:browser": "vitest run --config vitest.browser.config.ts",
-    "prepack": "pnpm build && pnpm typecheck && pnpm lint && pnpm test"
+    "prepack": "pnpm build && pnpm build:wasm && pnpm check:worklet && pnpm typecheck && pnpm lint && pnpm test"
   },
   "devDependencies": {
     "@vitest/browser-playwright": "^4.1.11",

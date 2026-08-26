@@ -21,7 +21,9 @@ Rust changes must also pass:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown --features wasm
 ```
+
+Building the npm worklet assets additionally requires `wasm-bindgen-cli` version `0.2.127`.

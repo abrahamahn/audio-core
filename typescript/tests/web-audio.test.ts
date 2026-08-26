@@ -301,6 +301,7 @@ describe('WebAudioOutput multi-channel mode', () => {
     );
 
     expect(output.masterEffectChain?.size).toBe(6);
+    expect(output.masterEffectInsert?.backend).toBe('native');
     expect(output.channelEffectChain('music')?.size).toBe(1);
     expect(output.channelEffectChain('effects')).toBeNull();
     expect(context.filters).toHaveLength(5);
@@ -319,6 +320,7 @@ describe('WebAudioOutput multi-channel mode', () => {
     if (compressor?.type !== 'compressor') throw new Error('missing compressor');
     compressor.setMakeupGainDb(6);
     expect(compressor.makeupNode.gain.value).toBeCloseTo(1.995, 3);
+    expect(output.masterEffectInsert?.setEnabled('glue', false)).toBe(true);
 
     const delay = output.masterEffectChain?.effect('echo');
     if (delay?.type !== 'delay') throw new Error('missing delay');

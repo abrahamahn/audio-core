@@ -10,11 +10,11 @@ Portable, allocation-bounded sample processors for the shared `audio-core` effec
 - damped algorithmic reverb.
 
 The crate owns DSP and validation, not device access, media decoding, browser lifecycle, or a native
-audio callback. It compiles for native Rust and `wasm32-unknown-unknown`; a browser only uses the
-Rust renderer after an explicit AudioWorklet/Wasm adapter is installed.
+audio callback. It compiles for native Rust and `wasm32-unknown-unknown`. The TypeScript package's
+`./rust-audio-worklet` entrypoint provides the browser adapter and packaged Wasm artifact.
 
 ```bash
 cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown --features wasm
 ```

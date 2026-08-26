@@ -17,8 +17,9 @@ export interface WebAudioEffectHandleBase<Type extends AudioEffectConfig['type']
   setEnabled(enabled: boolean): void;
 }
 
-export interface WebAudioFilterEffectHandle
-  extends WebAudioEffectHandleBase<'highpass' | 'lowpass'> {
+export interface WebAudioFilterEffectHandle extends WebAudioEffectHandleBase<
+  'highpass' | 'lowpass'
+> {
   readonly filterNode: BiquadFilterNode;
 }
 
@@ -71,6 +72,20 @@ export type WebAudioEffectHandle =
   | WebAudioReverbEffectHandle
   | WebAudioSaturationEffectHandle;
 
+export interface WebAudioEffectInsert {
+  readonly backend: 'native' | 'rust-worklet';
+  readonly inputNode: AudioNode;
+  readonly outputNode: AudioNode;
+  readonly size: number;
+  setEnabled(id: string, enabled: boolean): boolean | Promise<boolean>;
+  dispose(): void;
+}
+
+export interface WebAudioEffectChainFactory {
+  readonly backend: WebAudioEffectInsert['backend'];
+  create(context: AudioContext, configs: readonly AudioEffectConfig[]): WebAudioEffectInsert;
+}
+
 interface EffectStage {
   readonly handle: WebAudioEffectHandle;
   dispose(): void;
@@ -78,6 +93,7 @@ interface EffectStage {
 
 /** A serial insert chain that exposes native Web Audio nodes for live automation. */
 export class WebAudioEffectChain {
+  readonly backend = 'native' as const;
   readonly inputNode: GainNode;
   readonly outputNode: GainNode;
   readonly #effects = new Map<string, WebAudioEffectHandle>();
@@ -114,6 +130,13 @@ export class WebAudioEffectChain {
 
   effect(id: string): WebAudioEffectHandle | undefined {
     return this.#effects.get(id);
+  }
+
+  setEnabled(id: string, enabled: boolean): boolean {
+    const effect = this.#effects.get(id);
+    if (effect === undefined) return false;
+    effect.setEnabled(enabled);
+    return true;
   }
 
   dispose(): void {

@@ -24,3 +24,5 @@
 - Add live Web Audio effect handles for bypass and parameter control.
 - Add a Rust DSP crate with matching effect categories, in-place interleaved processing, native
   tests, strict linting, and `wasm32-unknown-unknown` compilation.
+- Add an opt-in Rust AudioWorklet renderer with packaged Wasm, fixed-buffer processing,
+  context-bound module loading, native-renderer fallback, and real Chromium/WebKit offline renders.

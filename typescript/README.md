@@ -13,6 +13,10 @@ its stream controller serializes readiness-aware replacements and optional cross
 Context recovery and stream/output/cache/runtime telemetry are typed, injected, and isolated so a
 failing observer cannot alter playback.
 
+The optional `./rust-audio-worklet` entrypoint loads the packaged Rust Wasm processor and returns a
+context-bound factory accepted by `WebAudioOutput.effectChainFactory`. Without that option, effects
+continue to use native Web Audio nodes.
+
 ```ts
 import {
   AudioAssetCache,
@@ -27,7 +31,9 @@ const planned = scheduler.plan(
   1_000,
 );
 
-const lifecycle = new AudioContextLifecycle({ createContext: () => new AudioContext() });
+const lifecycle = new AudioContextLifecycle({
+  createContext: () => new AudioContext(),
+});
 
 const assets = new AudioAssetCache({
   fetchEncoded: async (url: string) => fetch(url).then((response) => response.arrayBuffer()),
@@ -64,7 +70,13 @@ const output = new WebAudioOutput(
       { id: 'saturation', type: 'saturation', drive: 2, mix: 0.25 },
       { id: 'compressor', type: 'compressor', thresholdDb: -18, ratio: 3 },
       { id: 'reverb', type: 'reverb', roomSize: 0.35, wet: 0.12 },
-      { id: 'delay', type: 'delay', delaySeconds: 0.18, feedback: 0.2, wet: 0.08 },
+      {
+        id: 'delay',
+        type: 'delay',
+        delaySeconds: 0.18,
+        feedback: 0.2,
+        wet: 0.08,
+      },
     ],
     limiter: { thresholdDb: -8, ratio: 5 },
   },
@@ -78,11 +90,31 @@ output.duck([{ channel: 'music', level: 0.4 }], {
 });
 ```
 
+```ts
+import { loadRustAudioWorklet } from '@abrahamahn/audio-core/rust-audio-worklet';
+
+const rustEffects = await loadRustAudioWorklet(context).catch(() => undefined);
+const rustOutput = new WebAudioOutput(context, topology, {
+  effectChainFactory: rustEffects,
+  masterEffects: [
+    {
+      id: 'eq',
+      type: 'equalizer',
+      bands: [{ type: 'peaking', frequencyHz: 1_500, gainDb: -1 }],
+    },
+    { id: 'compressor', type: 'compressor', thresholdDb: -18, ratio: 3 },
+  ],
+});
+```
+
 See the repository README for responsibilities, invariants, and integration guidance.
 
 ```bash
 pnpm install --frozen-lockfile
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.127 --locked
 pnpm build
+pnpm build:wasm
 pnpm typecheck
 pnpm lint
 pnpm test

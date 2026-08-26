@@ -14,3 +14,9 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = "deny"
 pedantic = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

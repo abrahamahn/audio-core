@@ -7,7 +7,7 @@ lifecycle recovery, normalized level/pan calculations, browser activation/visibi
 preference normalization, asset-manifest selection, bounded encoded/decoded asset caching, and an
 optional Web Audio single/multi-channel output adapter with explicit stream replacement, ducking,
 limiter policy, serial effect chains, and failure-isolated telemetry hooks. A matching Rust crate
-provides allocation-bounded PCM processing for portable/native and future Wasm consumers.
+provides allocation-bounded PCM processing for native and browser AudioWorklet/Wasm consumers.
 
 - [`typescript/`](typescript/) — npm package `@abrahamahn/audio-core`
 - [`rust/`](rust/) — Rust crate `abrahamahn-audio-core` (`audio_core` library)
@@ -19,10 +19,10 @@ storage layer, or authoritative event source. It does not contain application cu
 asset URLs, local-storage keys, procedural sound design, or UI behavior. The optional Web Audio
 adapter routes caller-owned streams and buffers; it does not choose or fetch them.
 
-The browser adapter uses native Web Audio nodes. The Rust crate processes caller-owned interleaved
-PCM buffers and does not open an audio device. It builds for native targets and
-`wasm32-unknown-unknown`; using it in a browser renderer still requires an explicit AudioWorklet/Wasm
-adapter.
+Browser applications can select native Web Audio nodes or the packaged Rust AudioWorklet/Wasm
+renderer. The Rust crate processes caller-owned interleaved PCM buffers and does not open an audio
+device. Applications remain responsible for loading the worklet after browser activation and may
+fall back to the native renderer if that asynchronous load fails.
 
 Applications provide:
 
@@ -78,6 +78,8 @@ domain event → application cue mapping → AudioCueRequest
 - Channel and master faders follow their insert effects so ducking and mute also control effect
   tails.
 - Rust processes complete interleaved frames in place without allocating in the audio loop.
+- Worklet render calls reuse one fixed Wasm buffer and use numeric initialization/control calls.
+- Worklet and Wasm module loads are context-bound, coalesced, and retryable after failure.
 - The root module performs no global fetch, decode, clock, storage, DOM, or output operation.
 
 ## Example
@@ -93,7 +95,10 @@ import {
 } from '@abrahamahn/audio-core';
 
 type Cue = 'message' | 'warning';
-const scheduler = new CueScheduler<Cue>({ defaultMinGapMs: 80, maxLateByMs: 500 });
+const scheduler = new CueScheduler<Cue>({
+  defaultMinGapMs: 80,
+  maxLateByMs: 500,
+});
 const runtime = new AudioCueRuntime(scheduler);
 const receivedAtMs = performance.now();
 const planned = scheduler.plan(
@@ -175,7 +180,13 @@ const gameOutput = new WebAudioOutput(
       { id: 'warmth', type: 'saturation', drive: 2, mix: 0.25 },
       { id: 'glue', type: 'compressor', thresholdDb: -18, ratio: 3, mix: 0.8 },
       { id: 'room', type: 'reverb', roomSize: 0.35, damping: 0.4, wet: 0.12 },
-      { id: 'echo', type: 'delay', delaySeconds: 0.18, feedback: 0.2, wet: 0.08 },
+      {
+        id: 'echo',
+        type: 'delay',
+        delaySeconds: 0.18,
+        feedback: 0.2,
+        wet: 0.08,
+      },
     ],
     limiter: { thresholdDb: -8, ratio: 5 },
   },
@@ -198,7 +209,42 @@ elements and their URLs remain caller-owned.
 
 The Web Audio graph is exercised in real headless Chromium and WebKit in addition to the pure unit
 suite. The browser gate covers single-channel replacement, simultaneous named-channel voices,
-capacity rejection, the complete effect set, limiter construction, ducking, and telemetry delivery.
+capacity rejection, the complete effect set, limiter construction, ducking, telemetry delivery,
+and an offline render whose delayed sample is produced inside Rust Wasm.
+
+### Rust AudioWorklet renderer
+
+Load the packaged worklet once for an `AudioContext`, then pass its context-bound factory to any
+output that should use Rust effects. Omitting `effectChainFactory` keeps the native Web Audio path,
+which is also a straightforward fallback when loading fails.
+
+```ts
+import { loadRustAudioWorklet } from '@abrahamahn/audio-core/rust-audio-worklet';
+import { WebAudioOutput } from '@abrahamahn/audio-core/web-audio';
+
+const rustEffects = await loadRustAudioWorklet(context).catch(() => undefined);
+const output = new WebAudioOutput(context, topology, {
+  effectChainFactory: rustEffects,
+  masterEffects: [
+    {
+      id: 'master-eq',
+      type: 'equalizer',
+      bands: [
+        { type: 'lowshelf', frequencyHz: 100, gainDb: 1.5 },
+        { type: 'peaking', frequencyHz: 1_500, gainDb: -1, q: 1.2 },
+        { type: 'highshelf', frequencyHz: 8_000, gainDb: 1 },
+      ],
+    },
+    { id: 'glue', type: 'compressor', thresholdDb: -18, ratio: 3 },
+  ],
+});
+
+await output.masterEffectInsert?.setEnabled('glue', true);
+```
+
+`masterEffectChain` and `channelEffectChain` expose native-node automation only. The backend-neutral
+`masterEffectInsert` and `channelEffectInsert` expose backend identity and asynchronous bypass
+control for both renderers.
 
 ## Rust DSP
 
@@ -233,15 +279,19 @@ one context. `AudioCueRequest` is generic over the application cue vocabulary.
 The reusable `0.1` engine boundary is complete for its declared scope. It deliberately does not own
 adaptive bitrate delivery, captions, a media catalog, React settings, or Babylon world positioning.
 Those are integration packages or product behavior and should be added only with real consumers.
-The Rust DSP crate is real and tested; a future browser Wasm route must add an AudioWorklet adapter
-and benchmark it against native Web Audio before it becomes the default renderer.
+The Rust renderer is opt-in because worklet loading is asynchronous and native Web Audio remains a
+useful compatibility fallback. Product-specific listening tests and performance budgets determine
+which backend an application selects.
 
 ## Development
 
 ```bash
 cd typescript
 pnpm install --frozen-lockfile
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.127 --locked
 pnpm build
+pnpm build:wasm
 pnpm typecheck
 pnpm lint
 pnpm test
@@ -252,7 +302,7 @@ pnpm pack --dry-run
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown --features wasm
 ```

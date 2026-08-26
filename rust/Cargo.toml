@@ -13,6 +13,14 @@ version.workspace = true
 [lib]
 name = "audio_core"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+wasm-bindgen = { version = "=0.2.127", optional = true }
 
 [lints]
 workspace = true

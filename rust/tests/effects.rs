@@ -277,5 +277,7 @@ fn rejects_partial_interleaved_frames() {
         Err(EffectError::InvalidBufferShape)
     );
     assert!(chain.set_enabled("lp", false));
+    assert!(chain.set_enabled_at(0, true));
+    assert!(!chain.set_enabled_at(1, true));
     assert!(!chain.set_enabled("missing", false));
 }
