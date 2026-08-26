@@ -1,0 +1,50 @@
+{
+  "name": "@abrahamahn/audio-core",
+  "version": "0.1.0",
+  "description": "Framework-neutral semantic audio scheduling, policy, spatial, and asset primitives",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "author": "Abraham Joongwhan Ahn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abrahamahn/audio-core.git",
+    "directory": "typescript"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "type-check": "pnpm typecheck",
+    "lint": "eslint src tests --max-warnings 0",
+    "test": "vitest run",
+    "prepack": "pnpm build && pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.53.1",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.26.2"
+}
