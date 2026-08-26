@@ -1,4 +1,7 @@
 import {
+  type AudioDuckingEnvelope,
+  type AudioDuckTarget,
+  type AudioLimiterConfig,
   type AudioOutputChannelConfig,
   type AudioOutputTopology,
   type AudioVoiceOverflowPolicy,
@@ -8,6 +11,8 @@ import { clampAudioLevel, clampPan } from './policy.js';
 export interface WebAudioOutputOptions {
   readonly destination?: AudioNode;
   readonly masterLevel?: number;
+  /** Optional final dynamics stage between MASTER and destination. */
+  readonly limiter?: false | AudioLimiterConfig;
 }
 
 export interface WebAudioRouteOptions<Channel extends string> {
@@ -50,6 +55,7 @@ interface ChannelState {
   readonly input: GainNode;
   readonly config: ResolvedChannelConfig;
   readonly active: Set<ActiveSlot>;
+  baseLevel: number;
 }
 
 /**
@@ -59,6 +65,7 @@ interface ChannelState {
 export class WebAudioOutput<Channel extends string> {
   readonly #context: AudioContext;
   readonly #master: GainNode;
+  readonly #limiter: DynamicsCompressorNode | null;
   readonly #channels = new Map<Channel, ChannelState>();
   readonly #mediaSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
   #disposed = false;
@@ -72,12 +79,28 @@ export class WebAudioOutput<Channel extends string> {
     this.#context = context;
     this.#master = context.createGain();
     this.#master.gain.value = clampAudioLevel(options.masterLevel ?? 1);
-    this.#master.connect(options.destination ?? context.destination);
+    const destination = options.destination ?? context.destination;
+    if (
+      options.limiter !== undefined &&
+      options.limiter !== false &&
+      typeof context.createDynamicsCompressor === 'function'
+    ) {
+      this.#limiter = context.createDynamicsCompressor();
+      configureLimiter(this.#limiter, options.limiter);
+      this.#master.connect(this.#limiter).connect(destination);
+    } else {
+      this.#limiter = null;
+      this.#master.connect(destination);
+    }
     for (const [channel, config] of channels) this.#addChannel(channel, config);
   }
 
   get masterNode(): GainNode {
     return this.#master;
+  }
+
+  get limiterNode(): DynamicsCompressorNode | null {
+    return this.#limiter;
   }
 
   setMasterLevel(level: number): void {
@@ -87,7 +110,32 @@ export class WebAudioOutput<Channel extends string> {
 
   setChannelLevel(channel: Channel, level: number): void {
     this.#assertActive();
-    this.#channel(channel).input.gain.value = clampAudioLevel(level);
+    const state = this.#channel(channel);
+    state.baseLevel = clampAudioLevel(level);
+    const now = this.#context.currentTime;
+    state.input.gain.cancelScheduledValues(now);
+    state.input.gain.setValueAtTime(state.baseLevel, now);
+  }
+
+  /** Temporarily lower selected channels, then recover each one to its configured base level. */
+  duck(targets: readonly AudioDuckTarget<Channel>[], envelope: AudioDuckingEnvelope): void {
+    this.#assertActive();
+    const attackSeconds = milliseconds(envelope.attackMs, 'attackMs');
+    const holdSeconds = milliseconds(envelope.holdMs, 'holdMs');
+    const releaseSeconds = milliseconds(envelope.releaseMs, 'releaseMs');
+    const now = this.#context.currentTime;
+    const duckedAt = now + attackSeconds;
+    const recoverAt = duckedAt + holdSeconds;
+    for (const target of targets) {
+      const state = this.#channel(target.channel);
+      const gain = state.input.gain;
+      const level = clampAudioLevel(target.level);
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(gain.value, now);
+      gain.linearRampToValueAtTime(level, duckedAt);
+      gain.setValueAtTime(level, recoverAt);
+      gain.linearRampToValueAtTime(state.baseLevel, recoverAt + releaseSeconds);
+    }
   }
 
   activeVoiceCount(channel: Channel): number {
@@ -188,6 +236,7 @@ export class WebAudioOutput<Channel extends string> {
       terminateAll(state.active);
       state.input.disconnect();
     }
+    this.#limiter?.disconnect();
     this.#master.disconnect();
     this.#disposed = true;
   }
@@ -200,6 +249,7 @@ export class WebAudioOutput<Channel extends string> {
       input,
       config,
       active: new Set(),
+      baseLevel: config.level,
     });
   }
 
@@ -279,7 +329,16 @@ function resolveChannels<Channel extends string>(
 ): readonly (readonly [Channel, ResolvedChannelConfig])[] {
   if (topology.mode === 'single-channel') {
     validateChannel(topology.channel);
-    return [[topology.channel, resolveChannelConfig(topology.config, 1, 'stop-oldest')]];
+    return [
+      [
+        topology.channel,
+        {
+          level: clampAudioLevel(topology.config?.level ?? 1),
+          maxVoices: 1,
+          overflow: 'stop-oldest',
+        },
+      ],
+    ];
   }
   const entries = Object.entries(topology.channels) as [Channel, AudioOutputChannelConfig][];
   if (entries.length === 0) throw new RangeError('multi-channel output requires a channel');
@@ -296,10 +355,15 @@ function resolveChannelConfig(
 ): ResolvedChannelConfig {
   const maxVoices = config?.maxVoices ?? defaultMaxVoices;
   positiveSafeInteger(maxVoices, 'maxVoices');
+  const configuredOverflow: unknown = config?.overflow;
+  const overflow = configuredOverflow ?? defaultOverflow;
+  if (overflow !== 'reject-new' && overflow !== 'stop-oldest') {
+    throw new RangeError('overflow must be reject-new or stop-oldest');
+  }
   return {
     level: clampAudioLevel(config?.level ?? 1),
     maxVoices,
-    overflow: config?.overflow ?? defaultOverflow,
+    overflow,
   };
 }
 
@@ -315,6 +379,28 @@ function positiveSafeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new RangeError(`${name} must be a positive safe integer`);
   }
+}
+
+function milliseconds(value: number, name: string): number {
+  nonNegativeFinite(value, name);
+  return value / 1000;
+}
+
+function configureLimiter(node: DynamicsCompressorNode, config: AudioLimiterConfig): void {
+  node.threshold.value = bounded(config.thresholdDb ?? -8, -100, 0, 'thresholdDb');
+  node.knee.value = bounded(config.kneeDb ?? 8, 0, 40, 'kneeDb');
+  node.ratio.value = bounded(config.ratio ?? 5, 1, 20, 'ratio');
+  node.attack.value = bounded(config.attackSeconds ?? 0.004, 0, 1, 'attackSeconds');
+  node.release.value = bounded(config.releaseSeconds ?? 0.18, 0, 1, 'releaseSeconds');
+}
+
+function bounded(value: number, minimum: number, maximum: number, name: string): number {
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new RangeError(
+      `${name} must be between ${String(minimum)} and ${String(maximum)}`,
+    );
+  }
+  return value;
 }
 
 function positiveFinite(value: number, name: string): void {

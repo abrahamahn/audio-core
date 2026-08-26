@@ -1,7 +1,7 @@
 # Contributing
 
 Keep `audio-core` deterministic, framework-neutral, and independent of application cue names.
-Renderer integrations belong in adapters; Ganbate game choreography belongs in Ganbate.
+Renderer integrations belong in adapters; product choreography belongs in consuming applications.
 
 Run the complete TypeScript package gate before opening a pull request:
 

@@ -11,3 +11,4 @@
   eviction behavior.
 - Add a Web Audio adapter with replaceable single-channel streaming and bounded multi-channel
   voices mixed through one master bus.
+- Add validated final-limiter configuration and explicit channel ducking envelopes.

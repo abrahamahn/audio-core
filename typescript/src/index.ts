@@ -5,9 +5,13 @@ export {
   type RecoverableAudioContext,
 } from './context.js';
 export {
+  type AudioDuckingEnvelope,
+  type AudioDuckTarget,
+  type AudioLimiterConfig,
   type AudioOutputChannelConfig,
   type AudioOutputTopology,
   type AudioVoiceOverflowPolicy,
+  type SingleChannelOutputConfig,
 } from './output.js';
 export {
   CueScheduler,

@@ -9,12 +9,35 @@ export interface AudioOutputChannelConfig {
   readonly overflow?: AudioVoiceOverflowPolicy;
 }
 
+export type SingleChannelOutputConfig = Pick<AudioOutputChannelConfig, 'level'>;
+
+export interface AudioDuckTarget<Channel extends string> {
+  readonly channel: Channel;
+  /** Temporary linear channel gain from 0 to 1. */
+  readonly level: number;
+}
+
+export interface AudioDuckingEnvelope {
+  readonly attackMs: number;
+  readonly holdMs: number;
+  readonly releaseMs: number;
+}
+
+export interface AudioLimiterConfig {
+  readonly thresholdDb?: number;
+  readonly kneeDb?: number;
+  readonly ratio?: number;
+  readonly attackSeconds?: number;
+  readonly releaseSeconds?: number;
+}
+
 export type AudioOutputTopology<Channel extends string> =
   | {
       /** One replaceable output path, normally used for music or radio streaming. */
       readonly mode: 'single-channel';
       readonly channel: Channel;
-      readonly config?: AudioOutputChannelConfig;
+      /** Single-channel mode always retains exactly one replaceable route. */
+      readonly config?: SingleChannelOutputConfig;
     }
   | {
       /** Named channels mixed into one master bus, suitable for games and interactive scenes. */

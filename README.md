@@ -4,7 +4,7 @@
 applications. It owns typed cue intent, absolute/relative timing, replay deduplication, lateness and
 cancellation decisions, context lifecycle recovery, normalized level/pan calculations, browser
 activation/visibility gates, bounded encoded/decoded asset caching, and an optional Web Audio
-single/multi-channel output adapter.
+single/multi-channel output adapter with explicit ducking and limiter policy.
 
 - [`typescript/`](typescript/) — npm package `@abrahamahn/audio-core`
 
@@ -55,6 +55,8 @@ domain event → application cue mapping → AudioCueRequest
 - Context creation is activation-gated and concurrent resume attempts are coalesced.
 - Single-channel mode replaces the previous tracked stream/voice instead of stacking it.
 - Multi-channel mode enforces explicit per-channel voice bounds under one master bus.
+- Ducking envelopes restore each channel to its current configured base level.
+- Limiter parameters are checked against Web Audio's defined value ranges.
 - The root module performs no global fetch, decode, clock, storage, DOM, or output operation.
 
 ## Example
@@ -121,9 +123,14 @@ const gameOutput = new WebAudioOutput(context, {
     dialogue: { maxVoices: 2, overflow: 'stop-oldest' },
     ui: { maxVoices: 4, overflow: 'reject-new' },
   },
-});
+}, { limiter: { thresholdDb: -8, ratio: 5 } });
 gameOutput.playBuffer(cardBuffer, { channel: 'effects', pan: -0.35 });
 gameOutput.playBuffer(chipBuffer, { channel: 'effects', pan: 0.4 });
+gameOutput.duck([{ channel: 'music', level: 0.35 }], {
+  attackMs: 20,
+  holdMs: 300,
+  releaseMs: 180,
+});
 ```
 
 ## Extension points
@@ -135,10 +142,10 @@ one context. `AudioCueRequest` is generic over the application cue vocabulary.
 
 ## Deliberate next-stage work
 
-The initial extraction does not claim to be the complete future audio engine. Priority-aware
-ducking/limiting, asset-manifest selection, adaptive streaming policy, telemetry, and an optional
-Babylon spatial adapter should be added only with real consumers and browser parity tests. They
-should not be simulated in Rust or hidden inside Ganbate-specific synthesis.
+The initial extraction does not claim to be the complete future audio engine. Asset-manifest
+selection, adaptive streaming policy, telemetry, and an optional Babylon spatial adapter should be
+added only with real consumers and browser parity tests. They should not be simulated in Rust or
+hidden inside product-specific synthesis.
 
 ## Development
 

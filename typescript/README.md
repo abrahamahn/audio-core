@@ -2,7 +2,7 @@
 
 The TypeScript implementation of [`audio-core`](https://github.com/abrahamahn/audio-core):
 framework-neutral cue planning, replay deduplication, spatial/mix policy, context lifecycle,
-bounded injected asset caching, and optional Web Audio output topology.
+bounded injected asset caching, and optional Web Audio output topology with ducking and limiting.
 
 The root entrypoint does not create an `AudioContext`, read browser storage, fetch a fixed asset, or
 define application cue names. The `./web-audio` entrypoint routes caller-owned streams and decoded
@@ -41,9 +41,14 @@ const output = new WebAudioOutput(context, {
     music: { maxVoices: 1, overflow: 'stop-oldest' },
     effects: { maxVoices: 16, overflow: 'reject-new' },
   },
-});
+}, { limiter: { thresholdDb: -8, ratio: 5 } });
 
 output.playBuffer(explosion, { channel: 'effects', level: 0.8, pan: 0.2 });
+output.duck([{ channel: 'music', level: 0.4 }], {
+  attackMs: 20,
+  holdMs: 250,
+  releaseMs: 180,
+});
 ```
 
 See the repository README for responsibilities, invariants, and integration guidance.
