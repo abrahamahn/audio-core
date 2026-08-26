@@ -24,7 +24,11 @@ describe('AudioContextLifecycle', () => {
   it('recreates a closed context and closes the owned context on teardown', async () => {
     const first = { state: 'closed', resume: vi.fn(() => Promise.resolve()) };
     const close = vi.fn(() => Promise.resolve());
-    const second = { state: 'running', resume: vi.fn(() => Promise.resolve()), close };
+    const second = {
+      state: 'running',
+      resume: vi.fn(() => Promise.resolve()),
+      close,
+    };
     const createContext = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
     const lifecycle = new AudioContextLifecycle({ createContext });
 
@@ -43,7 +47,10 @@ describe('AudioContextLifecycle', () => {
       resume: vi.fn().mockRejectedValue(error),
     };
     const onResumeError = vi.fn();
-    const lifecycle = new AudioContextLifecycle({ createContext: () => context, onResumeError });
+    const lifecycle = new AudioContextLifecycle({
+      createContext: () => context,
+      onResumeError,
+    });
 
     lifecycle.acquire();
     await vi.waitFor(() => {

@@ -5,6 +5,11 @@ export {
   type RecoverableAudioContext,
 } from './context.js';
 export {
+  type AudioOutputChannelConfig,
+  type AudioOutputTopology,
+  type AudioVoiceOverflowPolicy,
+} from './output.js';
+export {
   CueScheduler,
   type CueDropReason,
   type CuePlaybackDecision,

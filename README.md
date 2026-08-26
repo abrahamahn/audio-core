@@ -3,7 +3,8 @@
 `audio-core` provides deterministic semantic-audio primitives for browser and interactive
 applications. It owns typed cue intent, absolute/relative timing, replay deduplication, lateness and
 cancellation decisions, context lifecycle recovery, normalized level/pan calculations, browser
-activation/visibility gates, and bounded encoded/decoded asset caching through injected functions.
+activation/visibility gates, bounded encoded/decoded asset caching, and an optional Web Audio
+single/multi-channel output adapter.
 
 - [`typescript/`](typescript/) — npm package `@abrahamahn/audio-core`
 
@@ -12,19 +13,20 @@ Rust port would add a second source of truth without an actual native-audio cons
 
 ## What it is not
 
-`audio-core` is not a Web Audio renderer, media player, asset catalog, React package, game-audio
-library, transport, storage layer, or authoritative event source. It does not contain application
-cue names, product asset URLs, local-storage keys, procedural synthesis, or UI behavior.
+`audio-core` is not a cue synthesizer, media catalog, React package, game-audio library, transport,
+storage layer, or authoritative event source. It does not contain application cue names, product
+asset URLs, local-storage keys, procedural sound design, or UI behavior. The optional Web Audio
+adapter routes caller-owned streams and buffers; it does not choose or fetch them.
 
 Applications provide:
 
 - their semantic cue vocabulary and mapping from authoritative domain events;
-- Web Audio, HTML media, native, or third-party playback adapters;
+- a native or third-party playback adapter when the optional Web Audio adapter is not used;
 - encoded asset fetch and context-specific decode functions;
 - asset URLs and fallback order;
 - persistence for player audio preferences;
 - a clock value when planning or consulting `CueScheduler`;
-- context construction and playback output.
+- context construction and media play/pause ownership.
 
 ## Core responsibilities
 
@@ -33,7 +35,9 @@ domain event → application cue mapping → AudioCueRequest
                                          ↓
                          scheduler + policy + asset cache
                                          ↓
-                            application-owned renderer
+                      caller renderer → output topology
+                                           ├─ single channel → MASTER
+                                           └─ named channels → MASTER
 ```
 
 ## Important invariants
@@ -49,7 +53,9 @@ domain event → application cue mapping → AudioCueRequest
 - Decode candidates are snapshotted before asynchronous work begins.
 - Decoded assets are never shared across distinct audio contexts.
 - Context creation is activation-gated and concurrent resume attempts are coalesced.
-- The core performs no global fetch, decode, clock, storage, DOM, or audio output operation.
+- Single-channel mode replaces the previous tracked stream/voice instead of stacking it.
+- Multi-channel mode enforces explicit per-channel voice bounds under one master bus.
+- The root module performs no global fetch, decode, clock, storage, DOM, or output operation.
 
 ## Example
 
@@ -94,6 +100,32 @@ const assets = new AudioAssetCache({
 if (context) await assets.loadFirst(context, ['/audio/message.ogg', '/audio/message.mp3']);
 ```
 
+Choose one output topology for an application runtime:
+
+```ts
+import { WebAudioOutput } from '@abrahamahn/audio-core/web-audio';
+
+// Music/radio/ambience: the next connection replaces the current one.
+const musicOutput = new WebAudioOutput(context, {
+  mode: 'single-channel',
+  channel: 'music',
+});
+musicOutput.connectMediaElement(audioElement, { channel: 'music' });
+
+// Games: independent channels mix simultaneous bounded voices into MASTER.
+const gameOutput = new WebAudioOutput(context, {
+  mode: 'multi-channel',
+  channels: {
+    music: { maxVoices: 1, overflow: 'stop-oldest' },
+    effects: { maxVoices: 24, overflow: 'reject-new' },
+    dialogue: { maxVoices: 2, overflow: 'stop-oldest' },
+    ui: { maxVoices: 4, overflow: 'reject-new' },
+  },
+});
+gameOutput.playBuffer(cardBuffer, { channel: 'effects', pan: -0.35 });
+gameOutput.playBuffer(chipBuffer, { channel: 'effects', pan: 0.4 });
+```
+
 ## Extension points
 
 `AudioAssetCache` accepts any object-shaped decode context and any decoded result type.
@@ -103,10 +135,10 @@ one context. `AudioCueRequest` is generic over the application cue vocabulary.
 
 ## Deliberate next-stage work
 
-The initial extraction does not claim to be the complete future audio engine. Voice concurrency,
-semantic bus graphs, ducking/limiting adapters, manifest selection, streaming policy, telemetry,
-and an optional Babylon spatial adapter should be added only with real consumers and browser
-parity tests. They should not be simulated in Rust or hidden inside Ganbate-specific synthesis.
+The initial extraction does not claim to be the complete future audio engine. Priority-aware
+ducking/limiting, asset-manifest selection, adaptive streaming policy, telemetry, and an optional
+Babylon spatial adapter should be added only with real consumers and browser parity tests. They
+should not be simulated in Rust or hidden inside Ganbate-specific synthesis.
 
 ## Development
 

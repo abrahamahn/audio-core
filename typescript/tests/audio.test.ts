@@ -122,7 +122,9 @@ describe('AudioAssetCache', () => {
 
     await expect(cache.loadFirst(context, ['tone.ogg'])).resolves.toBeNull();
     available = true;
-    await expect(cache.loadFirst(context, ['tone.ogg'])).resolves.toEqual({ byteLength: 8 });
+    await expect(cache.loadFirst(context, ['tone.ogg'])).resolves.toEqual({
+      byteLength: 8,
+    });
     expect(fetchEncoded).toHaveBeenCalledTimes(2);
   });
 

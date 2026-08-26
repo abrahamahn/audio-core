@@ -17,9 +17,21 @@ export interface PlannedAudioCue<Cue extends string> {
 export type CueDropReason = 'cancelled' | 'duplicate' | 'late' | 'rate-limited';
 
 export type CuePlaybackDecision =
-  | { readonly status: 'ready'; readonly dueAtMs: number; readonly lateByMs: number }
-  | { readonly status: 'defer'; readonly dueAtMs: number; readonly waitMs: number }
-  | { readonly status: 'drop'; readonly dueAtMs: number; readonly reason: CueDropReason };
+  | {
+      readonly status: 'ready';
+      readonly dueAtMs: number;
+      readonly lateByMs: number;
+    }
+  | {
+      readonly status: 'defer';
+      readonly dueAtMs: number;
+      readonly waitMs: number;
+    }
+  | {
+      readonly status: 'drop';
+      readonly dueAtMs: number;
+      readonly reason: CueDropReason;
+    };
 
 export class CueScheduler<Cue extends string> {
   readonly #defaultMinGapMs: number;

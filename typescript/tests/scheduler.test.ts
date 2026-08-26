@@ -33,7 +33,10 @@ describe('planned cue scheduling', () => {
   });
 
   it('drops cancelled, late, and rate-limited planned cues', () => {
-    const scheduler = new CueScheduler<'deal'>({ defaultMinGapMs: 20, maxLateByMs: 10 });
+    const scheduler = new CueScheduler<'deal'>({
+      defaultMinGapMs: 20,
+      maxLateByMs: 10,
+    });
     const request = {
       cue: 'deal',
       bus: 'game-foley',
@@ -41,7 +44,10 @@ describe('planned cue scheduling', () => {
       scheduledAtMs: 100,
     } as const;
     const planned = scheduler.plan(request, 100);
-    expect(scheduler.inspect(planned, 111)).toMatchObject({ status: 'drop', reason: 'late' });
+    expect(scheduler.inspect(planned, 111)).toMatchObject({
+      status: 'drop',
+      reason: 'late',
+    });
 
     scheduler.markPlayed('deal', 100);
     expect(scheduler.inspect(planned, 110)).toMatchObject({
@@ -58,13 +64,25 @@ describe('planned cue scheduling', () => {
   });
 
   it('bounds remembered event identities', () => {
-    const scheduler = new CueScheduler<'deal' | 'win'>({ maxRememberedEventIds: 1 });
+    const scheduler = new CueScheduler<'deal' | 'win'>({
+      maxRememberedEventIds: 1,
+    });
     const first = scheduler.plan(
-      { cue: 'deal', bus: 'game-foley', priority: 'material', eventId: 'first' },
+      {
+        cue: 'deal',
+        bus: 'game-foley',
+        priority: 'material',
+        eventId: 'first',
+      },
       10,
     );
     const second = scheduler.plan(
-      { cue: 'win', bus: 'game-foley', priority: 'important', eventId: 'second' },
+      {
+        cue: 'win',
+        bus: 'game-foley',
+        priority: 'important',
+        eventId: 'second',
+      },
       20,
     );
     expect(scheduler.commit(first, 10).status).toBe('ready');

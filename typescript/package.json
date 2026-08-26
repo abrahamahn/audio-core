@@ -18,6 +18,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./web-audio": {
+      "source": "./src/web-audio.ts",
+      "types": "./dist/web-audio.d.ts",
+      "default": "./dist/web-audio.js"
     }
   },
   "files": [
