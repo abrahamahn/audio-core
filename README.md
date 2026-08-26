@@ -1,9 +1,9 @@
 # audio-core
 
-`audio-core` provides small semantic-audio primitives for browser and interactive applications.
-It owns cue planning, throttling, cancellation and event deduplication, normalized level/pan
-calculations, context lifecycle policy, browser activation/visibility gates, typed cue intent, and
-bounded encoded/decoded asset caching through injected fetch and decode functions.
+`audio-core` provides deterministic semantic-audio primitives for browser and interactive
+applications. It owns typed cue intent, absolute/relative timing, replay deduplication, lateness and
+cancellation decisions, context lifecycle recovery, normalized level/pan calculations, browser
+activation/visibility gates, and bounded encoded/decoded asset caching through injected functions.
 
 - [`typescript/`](typescript/) — npm package `@abrahamahn/audio-core`
 
@@ -40,6 +40,7 @@ domain event → application cue mapping → AudioCueRequest
 
 - Cue timing and throttling depend only on caller-supplied time.
 - Planned cue commits remember bounded event identities so replayed events can be dropped.
+- Late, cancelled, duplicate, and rate-limited cues produce explicit decisions.
 - Cancellation groups remain closed until explicitly reopened or reset.
 - Level and pan helpers always return bounded finite values.
 - Concurrent requests share encoded downloads and per-context decoded work.
@@ -61,10 +62,21 @@ import {
 } from '@abrahamahn/audio-core';
 
 type Cue = 'message' | 'warning';
-const scheduler = new CueScheduler<Cue>({ defaultMinGapMs: 80 });
+const scheduler = new CueScheduler<Cue>({ defaultMinGapMs: 80, maxLateByMs: 500 });
+const receivedAtMs = performance.now();
+const planned = scheduler.plan(
+  {
+    cue: 'warning',
+    bus: 'ui',
+    priority: 'important',
+    eventId: 'connection:warning:42',
+    delayMs: 50,
+  },
+  receivedAtMs,
+);
 
-if (scheduler.canPlay('message', performance.now())) {
-  scheduler.markPlayed('message', performance.now());
+const decision = scheduler.commit(planned, receivedAtMs + 50);
+if (decision.status === 'ready') {
   const gain = gainForVolume(60);
   // Pass the cue and gain to an application-owned renderer.
 }
@@ -88,6 +100,13 @@ if (context) await assets.loadFirst(context, ['/audio/message.ogg', '/audio/mess
 `AudioContextLifecycle` accepts a caller-owned context factory. These ports keep the core
 independent of browser globals while preserving the essential rule that decoded buffers belong to
 one context. `AudioCueRequest` is generic over the application cue vocabulary.
+
+## Deliberate next-stage work
+
+The initial extraction does not claim to be the complete future audio engine. Voice concurrency,
+semantic bus graphs, ducking/limiting adapters, manifest selection, streaming policy, telemetry,
+and an optional Babylon spatial adapter should be added only with real consumers and browser
+parity tests. They should not be simulated in Rust or hidden inside Ganbate-specific synthesis.
 
 ## Development
 

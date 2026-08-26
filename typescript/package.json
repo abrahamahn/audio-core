@@ -1,7 +1,7 @@
 {
   "name": "@abrahamahn/audio-core",
   "version": "0.1.0",
-  "description": "Framework-neutral semantic audio scheduling, policy, spatial, and asset primitives",
+  "description": "Framework-neutral semantic audio scheduling, lifecycle, policy, spatial, and asset primitives",
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
@@ -41,7 +41,7 @@
     "vitest": "^4.1.8"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.13"
   },
   "publishConfig": {
     "access": "public"
