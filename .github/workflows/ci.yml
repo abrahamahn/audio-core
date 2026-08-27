@@ -23,7 +23,7 @@ jobs:
       - run: cargo doc --workspace --all-features --no-deps --locked
       - run: cargo check -p abrahamahn-audio-core --target wasm32-unknown-unknown --features wasm --locked
       - run: cargo package -p abrahamahn-audio-core --locked
-      - run: cargo test --manifest-path target/package/abrahamahn-audio-core-0.1.1/Cargo.toml --all-targets --all-features --locked
+      - run: cargo test --manifest-path target/package/abrahamahn-audio-core-0.2.0/Cargo.toml --all-targets --all-features --locked
 
   typescript:
     runs-on: ubuntu-latest
