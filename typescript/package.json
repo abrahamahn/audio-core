@@ -1,6 +1,6 @@
 {
   "name": "@abrahamahn/audio-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework-neutral semantic audio scheduling, lifecycle, policy, spatial, and asset primitives",
   "type": "module",
   "sideEffects": false,

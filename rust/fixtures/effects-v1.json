@@ -1,0 +1,108 @@
+{
+  "profile": "audio-core-effects-v1",
+  "chains": [
+    {
+      "name": "complete-common-chain",
+      "valid": true,
+      "effects": [
+        { "id": "hp", "enabled": true, "type": "highpass", "frequencyHz": 40, "q": 0.707 },
+        { "id": "lp", "enabled": true, "type": "lowpass", "frequencyHz": 18000, "q": 0.707 },
+        {
+          "id": "eq",
+          "enabled": true,
+          "type": "equalizer",
+          "bands": [
+            { "type": "lowshelf", "frequencyHz": 100, "gainDb": 2, "q": 0.707 },
+            { "type": "peaking", "frequencyHz": 2000, "gainDb": -3, "q": 1.4 },
+            { "type": "highshelf", "frequencyHz": 10000, "gainDb": 1, "q": 0.707 }
+          ]
+        },
+        { "id": "sat", "enabled": true, "type": "saturation", "drive": 4, "mix": 0.5 },
+        {
+          "id": "comp",
+          "enabled": true,
+          "type": "compressor",
+          "thresholdDb": -20,
+          "kneeDb": 6,
+          "ratio": 4,
+          "attackSeconds": 0.003,
+          "releaseSeconds": 0.25,
+          "makeupGainDb": 1,
+          "mix": 1
+        },
+        {
+          "id": "verb",
+          "enabled": true,
+          "type": "reverb",
+          "roomSize": 0.6,
+          "damping": 0.4,
+          "preDelaySeconds": 0.01,
+          "wet": 0.25,
+          "dry": 1
+        },
+        {
+          "id": "delay",
+          "enabled": true,
+          "type": "delay",
+          "delaySeconds": 0.25,
+          "feedback": 0.35,
+          "wet": 0.3,
+          "dry": 1
+        }
+      ]
+    },
+    {
+      "name": "duplicate-effect-id",
+      "valid": false,
+      "effects": [
+        { "id": "same", "enabled": true, "type": "highpass", "frequencyHz": 40, "q": 0.707 },
+        { "id": "same", "enabled": true, "type": "lowpass", "frequencyHz": 18000, "q": 0.707 }
+      ]
+    },
+    {
+      "name": "unsafe-delay-feedback",
+      "valid": false,
+      "effects": [
+        {
+          "id": "delay",
+          "enabled": true,
+          "type": "delay",
+          "delaySeconds": 0.25,
+          "feedback": 1,
+          "wet": 0.3,
+          "dry": 1
+        }
+      ]
+    },
+    {
+      "name": "empty-equalizer",
+      "valid": false,
+      "effects": [{ "id": "eq", "enabled": true, "type": "equalizer", "bands": [] }]
+    },
+    {
+      "name": "unsafe-compressor-ratio",
+      "valid": false,
+      "effects": [
+        {
+          "id": "comp",
+          "enabled": true,
+          "type": "compressor",
+          "thresholdDb": -20,
+          "kneeDb": 6,
+          "ratio": 30,
+          "attackSeconds": 0.003,
+          "releaseSeconds": 0.25,
+          "makeupGainDb": 1,
+          "mix": 1
+        }
+      ]
+    },
+    {
+      "name": "blank-effect-id",
+      "valid": false,
+      "effects": [
+        { "id": " ", "enabled": true, "type": "highpass", "frequencyHz": 40, "q": 0.707 }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Bound DSP channels, effects, sample rates, and persistent processor state before allocation.
+- Sanitize non-finite PCM and preserve AudioWorklet passthrough after renderer failures.
+- Execute the common filter, EQ, saturation, compressor, reverb, and delay validation contract in
+  TypeScript and Rust.
+- Verify native, Wasm, browser, npm, and Cargo package artifacts in CI.
+
 ## 0.1.0
 
 - Add generic cue planning, throttling, cancellation groups, lateness policy, and bounded event

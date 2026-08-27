@@ -48,10 +48,17 @@ describe('Rust AudioWorklet renderer', () => {
     const sampleRate = 48_000;
     const context = new OfflineAudioContext(1, 256, sampleRate);
     const events: string[] = [];
+    let resolveProcessorError: (() => void) | undefined;
+    const processorError = new Promise<void>((resolve) => {
+      resolveProcessorError = resolve;
+    });
     const factory = await loadRustAudioWorklet(context, {
       channels: 1,
       maxBlockFrames: 1,
-      onEvent: (event) => events.push(event.type),
+      onEvent: (event) => {
+        events.push(event.type);
+        if (event.type === 'processor-error') resolveProcessorError?.();
+      },
     });
     const effects = factory.createEffectChain([]);
     const input = context.createBuffer(1, 256, sampleRate);
@@ -66,6 +73,7 @@ describe('Rust AudioWorklet renderer', () => {
     await effects.ready;
     const rendered = await rendering;
     expect(rendered.getChannelData(0)[0]).toBeCloseTo(0.75, 4);
+    await processorError;
     expect(events).toContain('processor-error');
     effects.dispose();
   });

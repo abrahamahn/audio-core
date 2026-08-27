@@ -4,5 +4,7 @@
 typescript/dist/
 typescript/node_modules/
 typescript/coverage/
+typescript/.vitest-attachments/
+typescript/tests-browser/__screenshots__/
 typescript/*.tgz
 target/
