@@ -1,13 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from "vitest";
 
-import { AudioContextLifecycle } from '../src/index.js';
+import { AudioContextLifecycle } from "../src/index.js";
 
-describe('AudioContextLifecycle', () => {
-  it('waits for activation, owns one context, and deduplicates resume attempts', async () => {
+describe("AudioContextLifecycle", () => {
+  it("waits for activation, owns one context, and deduplicates resume attempts", async () => {
     let resolveResume: (() => void) | undefined;
     const context = {
-      state: 'suspended',
-      resume: vi.fn(() => new Promise<void>((resolve) => (resolveResume = resolve))),
+      state: "suspended",
+      resume: vi.fn(
+        () => new Promise<void>((resolve) => (resolveResume = resolve)),
+      ),
     };
     const createContext = vi.fn(() => context);
     const lifecycle = new AudioContextLifecycle({ createContext });
@@ -21,15 +23,18 @@ describe('AudioContextLifecycle', () => {
     await Promise.resolve();
   });
 
-  it('recreates a closed context and closes the owned context on teardown', async () => {
-    const first = { state: 'closed', resume: vi.fn(() => Promise.resolve()) };
+  it("recreates a closed context and closes the owned context on teardown", async () => {
+    const first = { state: "closed", resume: vi.fn(() => Promise.resolve()) };
     const close = vi.fn(() => Promise.resolve());
     const second = {
-      state: 'running',
+      state: "running",
       resume: vi.fn(() => Promise.resolve()),
       close,
     };
-    const createContext = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const createContext = vi
+      .fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
     const lifecycle = new AudioContextLifecycle({ createContext });
 
     expect(lifecycle.acquire()).toBe(first);
@@ -40,15 +45,15 @@ describe('AudioContextLifecycle', () => {
     expect(lifecycle.current).toBeNull();
   });
 
-  it('reports resume failures and retries on a later acquire', async () => {
-    const error = new Error('interrupted');
+  it("reports resume failures and retries on a later acquire", async () => {
+    const error = new Error("interrupted");
     const context = {
-      state: 'interrupted',
+      state: "interrupted",
       resume: vi.fn().mockRejectedValue(error),
     };
     const events: string[] = [];
     const onResumeError = vi.fn(() => {
-      throw new Error('diagnostic callback failed');
+      throw new Error("diagnostic callback failed");
     });
     const lifecycle = new AudioContextLifecycle({
       createContext: () => context,
@@ -65,11 +70,11 @@ describe('AudioContextLifecycle', () => {
       expect(context.resume).toHaveBeenCalledTimes(2);
     });
     expect(events).toEqual([
-      'context.created',
-      'context.resume-requested',
-      'context.resume-failed',
-      'context.resume-requested',
-      'context.resume-failed',
+      "context.created",
+      "context.resume-requested",
+      "context.resume-failed",
+      "context.resume-requested",
+      "context.resume-failed",
     ]);
   });
 });

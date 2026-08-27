@@ -1,6 +1,7 @@
 use audio_core::{
-    CompressorConfig, DelayConfig, EffectConfig, EqualizerBand, EqualizerBandKind, EqualizerConfig,
-    FilterConfig, FilterKind, ReverbConfig, SaturationConfig, validate_effect_chain,
+    CompressorConfig, DelayConfig, EffectChain, EffectConfig, EqualizerBand, EqualizerBandKind,
+    EqualizerConfig, FilterConfig, FilterKind, ReverbConfig, SaturationConfig,
+    validate_effect_chain,
 };
 use serde::Deserialize;
 
@@ -84,6 +85,23 @@ struct ChainVector {
 struct EffectFixture {
     profile: String,
     chains: Vec<ChainVector>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenderSample {
+    frame: usize,
+    value: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenderFixture {
+    profile: String,
+    sample_rate: f32,
+    frame_count: usize,
+    effects: Vec<EffectVector>,
+    samples: Vec<RenderSample>,
 }
 
 fn equalizer_kind(kind: &str) -> EqualizerBandKind {
@@ -211,5 +229,26 @@ fn effect_validation_matches_the_cross_language_conformance_corpus() {
             validate_effect_chain(&vector.effects.into_iter().map(effect).collect::<Vec<_>>())
                 .is_ok();
         assert_eq!(actual, vector.valid, "{}", vector.name);
+    }
+}
+
+#[test]
+fn native_dsp_matches_the_cross_runtime_render_corpus() {
+    let fixture: RenderFixture =
+        serde_json::from_str(include_str!("../fixtures/render-v1.json")).unwrap();
+    assert_eq!(fixture.profile, "audio-core-render-v1");
+    let effects = fixture.effects.into_iter().map(effect).collect::<Vec<_>>();
+    let mut chain = EffectChain::new(fixture.sample_rate, 1, &effects).unwrap();
+    let mut output = vec![0.0; fixture.frame_count];
+    output[0] = 1.0;
+    chain.process_interleaved(&mut output).unwrap();
+    for sample in fixture.samples {
+        assert!(
+            (output[sample.frame] - sample.value).abs() <= 1.0e-6,
+            "frame {}: expected {}, got {}",
+            sample.frame,
+            sample.value,
+            output[sample.frame]
+        );
     }
 }

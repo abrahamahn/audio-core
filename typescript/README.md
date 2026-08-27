@@ -105,6 +105,17 @@ const rustOutput = new WebAudioOutput(context, topology, {
     { id: 'compressor', type: 'compressor', thresholdDb: -18, ratio: 3 },
   ],
 });
+
+const rustChain = rustEffects?.createEffectChain([
+  { id: 'tone', type: 'lowpass', frequencyHz: 18_000 },
+]);
+await rustChain?.ready;
+await rustChain?.updateEffect({
+  id: 'tone',
+  type: 'lowpass',
+  frequencyHz: 8_000,
+  q: 0.9,
+});
 ```
 
 See the repository README for responsibilities, invariants, and integration guidance.

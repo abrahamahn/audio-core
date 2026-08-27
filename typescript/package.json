@@ -1,6 +1,6 @@
 {
   "name": "@abrahamahn/audio-core",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Framework-neutral semantic audio scheduling, lifecycle, policy, spatial, and asset primitives",
   "type": "module",
   "sideEffects": false,
@@ -55,11 +55,11 @@
   },
   "devDependencies": {
     "@vitest/browser-playwright": "^4.1.11",
-    "eslint": "^9.39.2",
+    "eslint": "^9.39.5",
     "playwright": "^1.62.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.53.1",
-    "vitest": "^4.1.8"
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=24.13"

@@ -1,4 +1,4 @@
-import type { AudioCueRequest } from './policy.js';
+import type { AudioCueRequest } from "./policy.js";
 
 export interface CueSchedulerOptions<Cue extends string> {
   readonly defaultMinGapMs?: number;
@@ -14,21 +14,21 @@ export interface PlannedAudioCue<Cue extends string> {
   readonly dueAtMs: number;
 }
 
-export type CueDropReason = 'cancelled' | 'duplicate' | 'late' | 'rate-limited';
+export type CueDropReason = "cancelled" | "duplicate" | "late" | "rate-limited";
 
 export type CuePlaybackDecision =
   | {
-      readonly status: 'ready';
+      readonly status: "ready";
       readonly dueAtMs: number;
       readonly lateByMs: number;
     }
   | {
-      readonly status: 'defer';
+      readonly status: "defer";
       readonly dueAtMs: number;
       readonly waitMs: number;
     }
   | {
-      readonly status: 'drop';
+      readonly status: "drop";
       readonly dueAtMs: number;
       readonly reason: CueDropReason;
     };
@@ -45,76 +45,95 @@ export class CueScheduler<Cue extends string> {
   constructor(options: CueSchedulerOptions<Cue> = {}) {
     this.#defaultMinGapMs = options.defaultMinGapMs ?? 0;
     if (!Number.isFinite(this.#defaultMinGapMs) || this.#defaultMinGapMs < 0) {
-      throw new RangeError('defaultMinGapMs must be finite and non-negative');
+      throw new RangeError("defaultMinGapMs must be finite and non-negative");
     }
     this.#minGapForCue = options.minGapForCue;
     this.#maxLateByMs = options.maxLateByMs ?? Number.POSITIVE_INFINITY;
     if (Number.isNaN(this.#maxLateByMs) || this.#maxLateByMs < 0) {
-      throw new RangeError('maxLateByMs must be non-negative');
+      throw new RangeError("maxLateByMs must be non-negative");
     }
     this.#maxRememberedEventIds = options.maxRememberedEventIds ?? 1024;
-    if (!Number.isSafeInteger(this.#maxRememberedEventIds) || this.#maxRememberedEventIds <= 0) {
-      throw new RangeError('maxRememberedEventIds must be a positive safe integer');
+    if (
+      !Number.isSafeInteger(this.#maxRememberedEventIds) ||
+      this.#maxRememberedEventIds <= 0
+    ) {
+      throw new RangeError(
+        "maxRememberedEventIds must be a positive safe integer",
+      );
     }
   }
 
   canPlay(cue: Cue, nowMs: number, cancellationGroup?: string): boolean {
-    if (!Number.isFinite(nowMs)) throw new RangeError('nowMs must be finite');
-    if (cancellationGroup !== undefined && this.#cancelledGroups.has(cancellationGroup)) {
+    if (!Number.isFinite(nowMs)) throw new RangeError("nowMs must be finite");
+    if (
+      cancellationGroup !== undefined &&
+      this.#cancelledGroups.has(cancellationGroup)
+    ) {
       return false;
     }
     const configuredGap = this.#minGapForCue?.(cue) ?? this.#defaultMinGapMs;
     if (!Number.isFinite(configuredGap) || configuredGap < 0) {
-      throw new RangeError('cue minimum gap must be finite and non-negative');
+      throw new RangeError("cue minimum gap must be finite and non-negative");
     }
-    return nowMs - (this.#lastPlayed.get(cue) ?? Number.NEGATIVE_INFINITY) >= configuredGap;
+    return (
+      nowMs - (this.#lastPlayed.get(cue) ?? Number.NEGATIVE_INFINITY) >=
+      configuredGap
+    );
   }
 
   markPlayed(cue: Cue, nowMs: number, eventId?: string): void {
-    if (!Number.isFinite(nowMs)) throw new RangeError('nowMs must be finite');
+    if (!Number.isFinite(nowMs)) throw new RangeError("nowMs must be finite");
     this.#lastPlayed.set(cue, nowMs);
-    if (eventId !== undefined && eventId !== '') this.#rememberEvent(eventId);
+    if (eventId !== undefined && eventId !== "") this.#rememberEvent(eventId);
   }
 
-  plan(request: AudioCueRequest<Cue>, receivedAtMs: number): PlannedAudioCue<Cue> {
-    finiteTime(receivedAtMs, 'receivedAtMs');
+  plan(
+    request: AudioCueRequest<Cue>,
+    receivedAtMs: number,
+  ): PlannedAudioCue<Cue> {
+    finiteTime(receivedAtMs, "receivedAtMs");
     const scheduledAtMs = request.scheduledAtMs ?? receivedAtMs;
-    finiteTime(scheduledAtMs, 'scheduledAtMs');
+    finiteTime(scheduledAtMs, "scheduledAtMs");
     const delayMs = request.delayMs ?? 0;
     if (!Number.isFinite(delayMs) || delayMs < 0) {
-      throw new RangeError('delayMs must be finite and non-negative');
+      throw new RangeError("delayMs must be finite and non-negative");
     }
     const dueAtMs = scheduledAtMs + delayMs;
-    finiteTime(dueAtMs, 'dueAtMs');
+    finiteTime(dueAtMs, "dueAtMs");
     return { request, dueAtMs };
   }
 
   inspect(planned: PlannedAudioCue<Cue>, nowMs: number): CuePlaybackDecision {
-    finiteTime(nowMs, 'nowMs');
-    finiteTime(planned.dueAtMs, 'dueAtMs');
+    finiteTime(nowMs, "nowMs");
+    finiteTime(planned.dueAtMs, "dueAtMs");
     const { request, dueAtMs } = planned;
     if (
       request.cancellationGroup !== undefined &&
       this.#cancelledGroups.has(request.cancellationGroup)
     ) {
-      return { status: 'drop', dueAtMs, reason: 'cancelled' };
+      return { status: "drop", dueAtMs, reason: "cancelled" };
     }
-    if (request.eventId !== undefined && this.#rememberedEventIds.has(request.eventId)) {
-      return { status: 'drop', dueAtMs, reason: 'duplicate' };
+    if (
+      request.eventId !== undefined &&
+      this.#rememberedEventIds.has(request.eventId)
+    ) {
+      return { status: "drop", dueAtMs, reason: "duplicate" };
     }
-    if (nowMs < dueAtMs) return { status: 'defer', dueAtMs, waitMs: dueAtMs - nowMs };
+    if (nowMs < dueAtMs)
+      return { status: "defer", dueAtMs, waitMs: dueAtMs - nowMs };
     const lateByMs = nowMs - dueAtMs;
-    if (lateByMs > this.#maxLateByMs) return { status: 'drop', dueAtMs, reason: 'late' };
+    if (lateByMs > this.#maxLateByMs)
+      return { status: "drop", dueAtMs, reason: "late" };
     if (!this.canPlay(request.cue, nowMs, request.cancellationGroup)) {
-      return { status: 'drop', dueAtMs, reason: 'rate-limited' };
+      return { status: "drop", dueAtMs, reason: "rate-limited" };
     }
-    return { status: 'ready', dueAtMs, lateByMs };
+    return { status: "ready", dueAtMs, lateByMs };
   }
 
   /** Atomically inspect and remember a cue that is ready for dispatch. */
   commit(planned: PlannedAudioCue<Cue>, nowMs: number): CuePlaybackDecision {
     const decision = this.inspect(planned, nowMs);
-    if (decision.status === 'ready') {
+    if (decision.status === "ready") {
       this.markPlayed(planned.request.cue, nowMs, planned.request.eventId);
     }
     return decision;
@@ -125,7 +144,7 @@ export class CueScheduler<Cue extends string> {
   }
 
   cancelGroup(group: string): void {
-    if (group !== '') this.#cancelledGroups.add(group);
+    if (group !== "") this.#cancelledGroups.add(group);
   }
 
   reopenGroup(group: string): void {

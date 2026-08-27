@@ -1,4 +1,4 @@
-import { clampAudioLevel, type AudioPriority } from './policy.js';
+import { clampAudioLevel, type AudioPriority } from "./policy.js";
 
 export interface AudioPreferences<Channel extends string> {
   readonly muted: boolean;
@@ -24,15 +24,20 @@ export function normalizeAudioPreferences<Channel extends string>(
   channels: readonly Channel[],
 ): AudioPreferences<Channel> {
   const source = isRecord(input) ? input : {};
-  const storedChannels = isRecord(source['channelLevels']) ? source['channelLevels'] : {};
+  const storedChannels = isRecord(source["channelLevels"])
+    ? source["channelLevels"]
+    : {};
   const channelLevels = Object.fromEntries(
-    channels.map((channel) => [channel, clampAudioLevel(numberOr(storedChannels[channel], 1))]),
+    channels.map((channel) => [
+      channel,
+      clampAudioLevel(numberOr(storedChannels[channel], 1)),
+    ]),
   ) as Record<Channel, number>;
   return {
-    muted: source['muted'] === true,
-    masterLevel: clampAudioLevel(numberOr(source['masterLevel'], 1)),
+    muted: source["muted"] === true,
+    masterLevel: clampAudioLevel(numberOr(source["masterLevel"], 1)),
     channelLevels,
-    reducedIntensity: source['reducedIntensity'] === true,
+    reducedIntensity: source["reducedIntensity"] === true,
   };
 }
 
@@ -44,7 +49,9 @@ export function effectiveAudioLevel<Channel extends string>(
   intensityPolicy: AudioIntensityPolicy = DEFAULT_AUDIO_INTENSITY_POLICY,
 ): number {
   if (preferences.muted) return 0;
-  const intensity = preferences.reducedIntensity ? clampAudioLevel(intensityPolicy[priority]) : 1;
+  const intensity = preferences.reducedIntensity
+    ? clampAudioLevel(intensityPolicy[priority])
+    : 1;
   return (
     clampAudioLevel(preferences.masterLevel) *
     clampAudioLevel(preferences.channelLevels[channel]) *
@@ -54,9 +61,9 @@ export function effectiveAudioLevel<Channel extends string>(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function numberOr(value: unknown, fallback: number): number {
-  return typeof value === 'number' ? value : fallback;
+  return typeof value === "number" ? value : fallback;
 }

@@ -8,6 +8,8 @@ use std::fmt::{Display, Formatter};
 pub const MAX_DSP_CHANNELS: usize = 32;
 pub const MAX_DSP_EFFECTS: usize = 128;
 pub const MAX_DSP_SAMPLE_RATE: f32 = 384_000.0;
+/// Default click-free transition time for bypass and live effect configuration changes.
+pub const DEFAULT_CONTROL_SMOOTHING_SECONDS: f32 = 0.02;
 /// At most 128 MiB of persistent `f32` delay/filter state per chain.
 pub const MAX_DSP_STATE_SAMPLES: usize = 33_554_432;
 
@@ -133,6 +135,8 @@ pub enum EffectError {
     DuplicateId(String),
     EmptyEqualizer,
     EmptyId,
+    EffectIdentityMismatch,
+    EffectTypeMismatch,
     InvalidBufferShape,
     InvalidChannelCount,
     InvalidSampleRate,
@@ -148,6 +152,12 @@ impl Display for EffectError {
             Self::DuplicateId(id) => write!(formatter, "duplicate audio effect id: {id}"),
             Self::EmptyEqualizer => formatter.write_str("equalizer requires a band"),
             Self::EmptyId => formatter.write_str("audio effect id must not be empty"),
+            Self::EffectIdentityMismatch => {
+                formatter.write_str("live audio effect updates must preserve effect identity")
+            }
+            Self::EffectTypeMismatch => {
+                formatter.write_str("live audio effect updates must preserve effect type")
+            }
             Self::InvalidBufferShape => {
                 formatter.write_str("interleaved samples must contain complete frames")
             }
@@ -248,7 +258,9 @@ pub fn validate_effect(config: &EffectConfig) -> Result<(), EffectError> {
 }
 
 pub struct EffectChain {
+    sample_rate: f32,
     channels: usize,
+    configs: Vec<EffectConfig>,
     processors: Vec<Processor>,
 }
 
@@ -278,7 +290,9 @@ impl EffectChain {
             .map(|config| Processor::new(sample_rate, channels, config))
             .collect();
         Ok(Self {
+            sample_rate,
             channels,
+            configs: configs.to_vec(),
             processors,
         })
     }
@@ -332,9 +346,94 @@ impl EffectChain {
         let Some(processor) = self.processors.get_mut(index) else {
             return false;
         };
-        processor.enabled = enabled;
+        processor.set_enabled(enabled, control_smoothing_frames(self.sample_rate));
+        set_config_enabled(&mut self.configs[index], enabled);
         true
     }
+
+    /// Replace one effect's complete configuration while preserving identity and chain position.
+    ///
+    /// The old and new processors are rendered in parallel for the default control smoothing
+    /// period. This keeps filter, EQ, dynamics, delay, and reverb changes click-free without
+    /// allocating in [`Self::process_interleaved`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError`] when the new configuration is invalid, changes the effect's
+    /// identity or type, or would exceed the temporary transition-state budget.
+    pub fn update_effect(&mut self, id: &str, config: EffectConfig) -> Result<bool, EffectError> {
+        let Some(index) = self
+            .processors
+            .iter()
+            .position(|processor| processor.id == id)
+        else {
+            return Ok(false);
+        };
+        self.update_effect_at(index, config)
+    }
+
+    /// Replace one effect's complete configuration by stable chain position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError`] under the same conditions as [`Self::update_effect`].
+    pub fn update_effect_at(
+        &mut self,
+        index: usize,
+        config: EffectConfig,
+    ) -> Result<bool, EffectError> {
+        let Some(current) = self.configs.get(index) else {
+            return Ok(false);
+        };
+        validate_effect(&config)?;
+        if current.id() != config.id() {
+            return Err(EffectError::EffectIdentityMismatch);
+        }
+        if std::mem::discriminant(current) != std::mem::discriminant(&config) {
+            return Err(EffectError::EffectTypeMismatch);
+        }
+
+        let mut next_configs = self.configs.clone();
+        next_configs[index] = config.clone();
+        let next_state =
+            effect_chain_state_samples(self.sample_rate, self.channels, &next_configs)?;
+        let transition_state = effect_chain_state_samples(
+            self.sample_rate,
+            self.channels,
+            std::slice::from_ref(current),
+        )?;
+        if next_state
+            .checked_add(transition_state)
+            .ok_or(EffectError::ResourceBudgetExceeded)?
+            > MAX_DSP_STATE_SAMPLES
+        {
+            return Err(EffectError::ResourceBudgetExceeded);
+        }
+
+        self.processors[index].update(
+            self.sample_rate,
+            self.channels,
+            &config,
+            control_smoothing_frames(self.sample_rate),
+        );
+        self.configs[index] = config;
+        Ok(true)
+    }
+}
+
+fn set_config_enabled(config: &mut EffectConfig, enabled: bool) {
+    match config {
+        EffectConfig::Compressor(config) => config.enabled = enabled,
+        EffectConfig::Delay(config) => config.enabled = enabled,
+        EffectConfig::Equalizer(config) => config.enabled = enabled,
+        EffectConfig::Filter(config) => config.enabled = enabled,
+        EffectConfig::Reverb(config) => config.enabled = enabled,
+        EffectConfig::Saturation(config) => config.enabled = enabled,
+    }
+}
+
+fn control_smoothing_frames(sample_rate: f32) -> usize {
+    seconds_to_samples(sample_rate, DEFAULT_CONTROL_SMOOTHING_SECONDS).max(1)
 }
 
 fn effect_chain_state_samples(
@@ -391,8 +490,9 @@ enum ProcessorKind {
 
 struct Processor {
     id: String,
-    enabled: bool,
+    enabled_mix: LinearRamp,
     kind: ProcessorKind,
+    transition: Option<ProcessorTransition>,
 }
 
 impl Processor {
@@ -423,16 +523,65 @@ impl Processor {
         };
         Self {
             id: config.id().to_owned(),
-            enabled: config.enabled(),
+            enabled_mix: LinearRamp::new(if config.enabled() { 1.0 } else { 0.0 }),
             kind,
+            transition: None,
         }
     }
 
     fn process_frame(&mut self, frame: &mut [f32]) {
-        if !self.enabled {
-            return;
+        let mut dry = [0.0_f32; MAX_DSP_CHANNELS];
+        dry[..frame.len()].copy_from_slice(frame);
+
+        if let Some(transition) = &mut self.transition {
+            let mut previous = [0.0_f32; MAX_DSP_CHANNELS];
+            previous[..frame.len()].copy_from_slice(frame);
+            transition
+                .previous
+                .process_frame(&mut previous[..frame.len()]);
+            self.kind.process_frame(frame);
+            let mix = transition.mix.next();
+            for (sample, old) in frame.iter_mut().zip(previous) {
+                *sample = old * (1.0 - mix) + *sample * mix;
+            }
+            if transition.mix.finished() {
+                self.transition = None;
+            }
+        } else {
+            self.kind.process_frame(frame);
         }
-        match &mut self.kind {
+
+        let enabled = self.enabled_mix.next();
+        for (sample, dry) in frame.iter_mut().zip(dry) {
+            *sample = dry * (1.0 - enabled) + *sample * enabled;
+        }
+    }
+
+    fn set_enabled(&mut self, enabled: bool, smoothing_frames: usize) {
+        self.enabled_mix
+            .set_target(if enabled { 1.0 } else { 0.0 }, smoothing_frames);
+    }
+
+    fn update(
+        &mut self,
+        sample_rate: f32,
+        channels: usize,
+        config: &EffectConfig,
+        smoothing_frames: usize,
+    ) {
+        let next = Processor::new(sample_rate, channels, config);
+        let previous = std::mem::replace(&mut self.kind, next.kind);
+        self.transition = Some(ProcessorTransition {
+            previous,
+            mix: LinearRamp::transition(smoothing_frames),
+        });
+        self.set_enabled(config.enabled(), smoothing_frames);
+    }
+}
+
+impl ProcessorKind {
+    fn process_frame(&mut self, frame: &mut [f32]) {
+        match self {
             ProcessorKind::Compressor(processor) => processor.process_frame(frame),
             ProcessorKind::Delay(processor) => processor.process_frame(frame),
             ProcessorKind::Equalizer(processor) => processor.process_frame(frame),
@@ -440,6 +589,57 @@ impl Processor {
             ProcessorKind::Reverb(processor) => processor.process_frame(frame),
             ProcessorKind::Saturation(processor) => processor.process_frame(frame),
         }
+    }
+}
+
+struct ProcessorTransition {
+    previous: ProcessorKind,
+    mix: LinearRamp,
+}
+
+struct LinearRamp {
+    current: f32,
+    target: f32,
+    step: f32,
+    remaining: usize,
+}
+
+impl LinearRamp {
+    fn new(value: f32) -> Self {
+        Self {
+            current: value,
+            target: value,
+            step: 0.0,
+            remaining: 0,
+        }
+    }
+
+    fn transition(frames: usize) -> Self {
+        let mut ramp = Self::new(0.0);
+        ramp.set_target(1.0, frames);
+        ramp
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn set_target(&mut self, target: f32, frames: usize) {
+        self.target = target;
+        self.remaining = frames.max(1);
+        self.step = (target - self.current) / self.remaining as f32;
+    }
+
+    fn next(&mut self) -> f32 {
+        if self.remaining > 0 {
+            self.current += self.step;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.current = self.target;
+            }
+        }
+        self.current
+    }
+
+    fn finished(&self) -> bool {
+        self.remaining == 0
     }
 }
 

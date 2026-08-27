@@ -1,6 +1,12 @@
-export type SemanticAudioBus = 'music' | 'ambience' | 'dialogue' | 'game-foley' | 'ui' | 'spatial';
+export type SemanticAudioBus =
+  | "music"
+  | "ambience"
+  | "dialogue"
+  | "game-foley"
+  | "ui"
+  | "spatial";
 
-export type AudioPriority = 'material' | 'normal' | 'important';
+export type AudioPriority = "material" | "normal" | "important";
 
 export interface AudioSpatialPosition {
   readonly x: number;
@@ -31,7 +37,9 @@ export function clampPan(pan: number): number {
 }
 
 export function gainForVolume(volume: number): number {
-  const clamped = Number.isFinite(volume) ? Math.min(100, Math.max(0, volume)) : 0;
+  const clamped = Number.isFinite(volume)
+    ? Math.min(100, Math.max(0, volume))
+    : 0;
   return (clamped / 100) ** 2;
 }
 
@@ -55,6 +63,8 @@ export function audioActivationAllowsPlayback(
   return activation === undefined || activation.hasBeenActive;
 }
 
-export function visibilityAllowsSound(visibilityState: string | undefined): boolean {
-  return visibilityState === undefined || visibilityState === 'visible';
+export function visibilityAllowsSound(
+  visibilityState: string | undefined,
+): boolean {
+  return visibilityState === undefined || visibilityState === "visible";
 }

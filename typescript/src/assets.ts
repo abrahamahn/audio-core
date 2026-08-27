@@ -2,7 +2,7 @@ import {
   emitAudioTelemetry,
   type AudioAssetCacheTelemetryEvent,
   type AudioTelemetrySink,
-} from './telemetry.js';
+} from "./telemetry.js";
 
 export interface AudioAssetCacheOptions<Context extends object, Decoded> {
   readonly fetchEncoded: (url: string) => Promise<ArrayBuffer | null>;
@@ -15,11 +15,16 @@ export interface AudioAssetCacheOptions<Context extends object, Decoded> {
 }
 
 export class AudioAssetCache<Context extends object, Decoded> {
-  readonly #fetchEncoded: AudioAssetCacheOptions<Context, Decoded>['fetchEncoded'];
-  readonly #decode: AudioAssetCacheOptions<Context, Decoded>['decode'];
+  readonly #fetchEncoded: AudioAssetCacheOptions<
+    Context,
+    Decoded
+  >["fetchEncoded"];
+  readonly #decode: AudioAssetCacheOptions<Context, Decoded>["decode"];
   readonly #maxEncodedEntries: number;
   readonly #maxDecodedEntriesPerContext: number;
-  readonly #telemetry: AudioTelemetrySink<AudioAssetCacheTelemetryEvent> | undefined;
+  readonly #telemetry:
+    | AudioTelemetrySink<AudioAssetCacheTelemetryEvent>
+    | undefined;
   readonly #encoded = new Map<string, Promise<ArrayBuffer | null>>();
   #decoded = new WeakMap<Context, Map<string, Promise<Decoded | null>>>();
 
@@ -27,10 +32,13 @@ export class AudioAssetCache<Context extends object, Decoded> {
     this.#fetchEncoded = options.fetchEncoded;
     this.#decode = options.decode;
     this.#telemetry = options.telemetry;
-    this.#maxEncodedEntries = positiveInteger(options.maxEncodedEntries ?? 64, 'maxEncodedEntries');
+    this.#maxEncodedEntries = positiveInteger(
+      options.maxEncodedEntries ?? 64,
+      "maxEncodedEntries",
+    );
     this.#maxDecodedEntriesPerContext = positiveInteger(
       options.maxDecodedEntriesPerContext ?? 32,
-      'maxDecodedEntriesPerContext',
+      "maxDecodedEntriesPerContext",
     );
   }
 
@@ -53,18 +61,22 @@ export class AudioAssetCache<Context extends object, Decoded> {
     this.#encoded.set(url, request);
     for (const key of evictOldest(this.#encoded, this.#maxEncodedEntries)) {
       emitAudioTelemetry(this.#telemetry, {
-        type: 'asset.cache-evicted',
-        cache: 'encoded',
+        type: "asset.cache-evicted",
+        cache: "encoded",
         key,
       });
     }
     void request.then((bytes) => {
-      if (bytes === null && this.#encoded.get(url) === request) this.#encoded.delete(url);
+      if (bytes === null && this.#encoded.get(url) === request)
+        this.#encoded.delete(url);
     });
     return request;
   }
 
-  loadFirst(context: Context, candidateUrls: readonly string[]): Promise<Decoded | null> {
+  loadFirst(
+    context: Context,
+    candidateUrls: readonly string[],
+  ): Promise<Decoded | null> {
     const candidates = [...candidateUrls];
     const key = JSON.stringify(candidates);
     let contextCache = this.#decoded.get(context);
@@ -79,15 +91,19 @@ export class AudioAssetCache<Context extends object, Decoded> {
     }
     const request = this.#decodeFirst(context, candidates);
     contextCache.set(key, request);
-    for (const evictedKey of evictOldest(contextCache, this.#maxDecodedEntriesPerContext)) {
+    for (const evictedKey of evictOldest(
+      contextCache,
+      this.#maxDecodedEntriesPerContext,
+    )) {
       emitAudioTelemetry(this.#telemetry, {
-        type: 'asset.cache-evicted',
-        cache: 'decoded',
+        type: "asset.cache-evicted",
+        cache: "decoded",
         key: evictedKey,
       });
     }
     void request.then((decoded) => {
-      if (decoded === null && contextCache.get(key) === request) contextCache.delete(key);
+      if (decoded === null && contextCache.get(key) === request)
+        contextCache.delete(key);
     });
     return request;
   }
@@ -109,14 +125,20 @@ export class AudioAssetCache<Context extends object, Decoded> {
     this.#decoded = new WeakMap();
   }
 
-  async #decodeFirst(context: Context, candidateUrls: readonly string[]): Promise<Decoded | null> {
+  async #decodeFirst(
+    context: Context,
+    candidateUrls: readonly string[],
+  ): Promise<Decoded | null> {
     for (const url of candidateUrls) {
       const bytes = await this.preload(url);
       if (bytes === null) continue;
       try {
         return await this.#decode(context, bytes.slice(0));
       } catch {
-        emitAudioTelemetry(this.#telemetry, { type: 'asset.decode-failed', url });
+        emitAudioTelemetry(this.#telemetry, {
+          type: "asset.decode-failed",
+          url,
+        });
         // A codec declaration may be optimistic; try the next immutable variant.
       }
     }
@@ -124,7 +146,7 @@ export class AudioAssetCache<Context extends object, Decoded> {
   }
 
   #emitFetchFailure(url: string): void {
-    emitAudioTelemetry(this.#telemetry, { type: 'asset.fetch-failed', url });
+    emitAudioTelemetry(this.#telemetry, { type: "asset.fetch-failed", url });
   }
 }
 
@@ -140,7 +162,10 @@ function touch<Key, Value>(map: Map<Key, Value>, key: Key, value: Value): void {
   map.set(key, value);
 }
 
-function evictOldest<Key, Value>(map: Map<Key, Value>, maximumSize: number): Key[] {
+function evictOldest<Key, Value>(
+  map: Map<Key, Value>,
+  maximumSize: number,
+): Key[] {
   const evicted: Key[] = [];
   while (map.size > maximumSize) {
     const oldest = map.keys().next().value;

@@ -22,10 +22,13 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
         this.port.postMessage({ type: 'disposed' });
         return;
       }
-      if (message?.type !== 'set-enabled') return;
-      const updated = this.engine?.set_enabled_at(message.index, message.enabled) ?? false;
+      if (message?.type !== 'set-enabled' && message?.type !== 'update-effect') return;
+      const updated =
+        message.type === 'set-enabled'
+          ? (this.engine?.set_enabled_at(message.index, message.enabled) ?? false)
+          : applyEffectUpdate(this.engine, message.index, message.effect);
       this.port.postMessage({
-        type: 'enabled-set',
+        type: 'control-set',
         requestId: message.requestId,
         updated,
       });
@@ -105,6 +108,71 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
   fail(message) {
     this.failed = true;
     this.port.postMessage({ type: 'processor-error', message });
+  }
+}
+
+function applyEffectUpdate(engine, index, effect) {
+  if (engine === null || effect === null || typeof effect !== 'object') return false;
+  switch (effect.type) {
+    case 'filter':
+      return engine.update_filter_at(
+        index,
+        effect.enabled,
+        effect.kind,
+        effect.frequencyHz,
+        effect.q,
+      );
+    case 'equalizer': {
+      let updated = engine.begin_equalizer_update(index, effect.enabled);
+      for (const band of effect.bands) {
+        updated &&= engine.add_equalizer_update_band(
+          band.kind,
+          band.frequencyHz,
+          band.gainDb,
+          band.q,
+        );
+      }
+      if (!updated) {
+        engine.cancel_equalizer_update();
+        return false;
+      }
+      return engine.finish_equalizer_update();
+    }
+    case 'saturation':
+      return engine.update_saturation_at(index, effect.enabled, effect.drive, effect.mix);
+    case 'compressor':
+      return engine.update_compressor_at(
+        index,
+        effect.enabled,
+        effect.thresholdDb,
+        effect.kneeDb,
+        effect.ratio,
+        effect.attackSeconds,
+        effect.releaseSeconds,
+        effect.makeupGainDb,
+        effect.mix,
+      );
+    case 'delay':
+      return engine.update_delay_at(
+        index,
+        effect.enabled,
+        effect.delaySeconds,
+        effect.feedback,
+        effect.wet,
+        effect.dry,
+      );
+    case 'reverb':
+      return engine.update_reverb_at(
+        index,
+        effect.enabled,
+        effect.roomSize,
+        effect.damping,
+        effect.preDelaySeconds,
+        effect.wet,
+        effect.dry,
+      );
+    default:
+      return false;
   }
 }
 

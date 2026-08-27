@@ -1,7 +1,15 @@
-import { validateAudioEffectChain, type AudioEffectConfig } from './effects.js';
-import type { WebAudioEffectChainFactory, WebAudioEffectInsert } from './web-audio-effects.js';
+import {
+  validateAudioEffectChain,
+  validateAudioEffectConfig,
+  type AudioEffectConfig,
+} from "./effects.js";
+import type {
+  WebAudioEffectChainFactory,
+  WebAudioEffectInsert,
+} from "./web-audio-effects.js";
 
-export const RUST_AUDIO_WORKLET_PROCESSOR_NAME = 'abrahamahn-audio-core-rust-effects';
+export const RUST_AUDIO_WORKLET_PROCESSOR_NAME =
+  "abrahamahn-audio-core-rust-effects";
 
 export type AudioWorkletCapableContext = BaseAudioContext & {
   readonly audioWorklet: AudioWorklet;
@@ -18,14 +26,16 @@ export interface RustAudioWorkletLoadOptions {
 }
 
 export type RustAudioWorkletEvent =
-  | { readonly type: 'disposed' }
-  | { readonly type: 'processor-error'; readonly message: string }
-  | { readonly type: 'ready' };
+  | { readonly type: "disposed" }
+  | { readonly type: "processor-error"; readonly message: string }
+  | { readonly type: "ready" };
 
 export interface RustAudioWorkletEffectHandle {
   readonly id: string;
-  readonly type: AudioEffectConfig['type'];
+  readonly type: AudioEffectConfig["type"];
   setEnabled(enabled: boolean): Promise<boolean>;
+  /** Replace the complete configuration without rebuilding the worklet node. */
+  update(config: AudioEffectConfig): Promise<boolean>;
 }
 
 export interface RustAudioWorkletAssetUrls {
@@ -38,12 +48,18 @@ interface ContextLoadCache {
   readonly wasm: Map<string, Promise<WebAssembly.Module>>;
 }
 
-const loadedModules = new WeakMap<AudioWorkletCapableContext, ContextLoadCache>();
+const loadedModules = new WeakMap<
+  AudioWorkletCapableContext,
+  ContextLoadCache
+>();
 
 export function rustAudioWorkletAssetUrls(): RustAudioWorkletAssetUrls {
   return {
-    processor: new URL('../dist/audio-worklet/rust-effects-processor.js', import.meta.url),
-    wasm: new URL('../dist/wasm/audio_core_wasm_bg.wasm', import.meta.url),
+    processor: new URL(
+      "../dist/audio-worklet/rust-effects-processor.js",
+      import.meta.url,
+    ),
+    wasm: new URL("../dist/wasm/audio_core_wasm_bg.wasm", import.meta.url),
   };
 }
 
@@ -56,8 +72,11 @@ export async function loadRustAudioWorklet(
   const wasmUrl = options.wasmUrl ?? defaults.wasm;
   const fetchWasm =
     options.fetchWasm ??
-    (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined);
-  if (typeof fetchWasm !== 'function') throw new Error('fetch is required to load Rust audio Wasm');
+    (typeof globalThis.fetch === "function"
+      ? globalThis.fetch.bind(globalThis)
+      : undefined);
+  if (typeof fetchWasm !== "function")
+    throw new Error("fetch is required to load Rust audio Wasm");
   let cache = loadedModules.get(context);
   if (cache === undefined) {
     cache = { processors: new Map(), wasm: new Map() };
@@ -66,10 +85,12 @@ export async function loadRustAudioWorklet(
   const processorKey = processorUrl.toString();
   let processorRequest = cache.processors.get(processorKey);
   if (processorRequest === undefined) {
-    processorRequest = context.audioWorklet.addModule(processorKey).catch((error: unknown) => {
-      cache.processors.delete(processorKey);
-      throw error;
-    });
+    processorRequest = context.audioWorklet
+      .addModule(processorKey)
+      .catch((error: unknown) => {
+        cache.processors.delete(processorKey);
+        throw error;
+      });
     cache.processors.set(processorKey, processorRequest);
   }
   const wasmKey = wasmUrl.toString();
@@ -87,7 +108,7 @@ export async function loadRustAudioWorklet(
 
 /** A context-bound, already-loaded factory suitable for `WebAudioOutput.effectChainFactory`. */
 export class RustAudioWorkletFactory implements WebAudioEffectChainFactory {
-  readonly backend = 'rust-worklet' as const;
+  readonly backend = "rust-worklet" as const;
   readonly #context: AudioWorkletCapableContext;
   readonly #wasmModule: WebAssembly.Module;
   readonly #channels: number;
@@ -102,18 +123,18 @@ export class RustAudioWorkletFactory implements WebAudioEffectChainFactory {
   ) {
     this.#context = context;
     this.#wasmModule = wasmModule;
-    this.#channels = integerBetween(options.channels ?? 2, 1, 32, 'channels');
+    this.#channels = integerBetween(options.channels ?? 2, 1, 32, "channels");
     this.#maxBlockFrames = integerBetween(
       options.maxBlockFrames ?? 128,
       1,
       4_096,
-      'maxBlockFrames',
+      "maxBlockFrames",
     );
     this.#controlTimeoutMs = integerBetween(
       options.controlTimeoutMs ?? 2_000,
       1,
       60_000,
-      'controlTimeoutMs',
+      "controlTimeoutMs",
     );
     this.#onEvent = options.onEvent;
   }
@@ -123,12 +144,16 @@ export class RustAudioWorkletFactory implements WebAudioEffectChainFactory {
     configs: readonly AudioEffectConfig[],
   ): RustAudioWorkletEffectChain {
     if (context !== this.#context) {
-      throw new Error('Rust audio worklet factories are bound to the context that loaded them');
+      throw new Error(
+        "Rust audio worklet factories are bound to the context that loaded them",
+      );
     }
     return this.createEffectChain(configs);
   }
 
-  createEffectChain(configs: readonly AudioEffectConfig[]): RustAudioWorkletEffectChain {
+  createEffectChain(
+    configs: readonly AudioEffectConfig[],
+  ): RustAudioWorkletEffectChain {
     validateAudioEffectChain(configs);
     return new RustAudioWorkletEffectChain(
       this.#context,
@@ -148,7 +173,7 @@ interface PendingControl {
 }
 
 export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
-  readonly backend = 'rust-worklet' as const;
+  readonly backend = "rust-worklet" as const;
   readonly node: AudioWorkletNode;
   readonly inputNode: AudioWorkletNode;
   readonly outputNode: AudioWorkletNode;
@@ -178,20 +203,24 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
       this.#rejectReady = reject;
     });
     void this.ready.catch(() => undefined);
-    this.node = new AudioWorkletNode(context, RUST_AUDIO_WORKLET_PROCESSOR_NAME, {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [channels],
-      channelCount: channels,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      processorOptions: {
-        wasmModule,
-        channels,
-        maxBlockFrames,
-        effects: configs.map(toRustEffectConfig),
+    this.node = new AudioWorkletNode(
+      context,
+      RUST_AUDIO_WORKLET_PROCESSOR_NAME,
+      {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [channels],
+        channelCount: channels,
+        channelCountMode: "explicit",
+        channelInterpretation: "speakers",
+        processorOptions: {
+          wasmModule,
+          channels,
+          maxBlockFrames,
+          effects: configs.map(toRustEffectConfig),
+        },
       },
-    });
+    );
     this.inputNode = this.node;
     this.outputNode = this.node;
     for (const [index, config] of configs.entries()) {
@@ -199,13 +228,15 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
         id: config.id,
         type: config.type,
         setEnabled: (enabled) => this.#setEnabledAt(index, enabled),
+        update: (next) =>
+          this.#updateEffectAt(index, config.id, config.type, next),
       });
     }
     this.node.port.onmessage = (event: MessageEvent<unknown>) => {
       this.#handleMessage(event.data);
     };
     this.node.onprocessorerror = () => {
-      this.#fail('Rust audio worklet processor terminated unexpectedly');
+      this.#fail("Rust audio worklet processor terminated unexpectedly");
     };
   }
 
@@ -219,15 +250,27 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
 
   setEnabled(id: string, enabled: boolean): Promise<boolean> {
     const effect = this.#effects.get(id);
-    return effect === undefined ? Promise.resolve(false) : effect.setEnabled(enabled);
+    return effect === undefined
+      ? Promise.resolve(false)
+      : effect.setEnabled(enabled);
+  }
+
+  /** Replace one effect's complete configuration with a click-free Rust DSP transition. */
+  updateEffect(config: AudioEffectConfig): Promise<boolean> {
+    const effect = this.#effects.get(config.id);
+    return effect === undefined
+      ? Promise.resolve(false)
+      : effect.update(config);
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.node.disconnect();
-    this.node.port.postMessage({ type: 'dispose' });
-    this.#rejectReady?.(new Error('Rust audio worklet effect chain was disposed before ready'));
+    this.node.port.postMessage({ type: "dispose" });
+    this.#rejectReady?.(
+      new Error("Rust audio worklet effect chain was disposed before ready"),
+    );
     this.#clearReadySettlers();
     for (const pending of this.#pending.values()) {
       globalThis.clearTimeout(pending.timer);
@@ -238,6 +281,38 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
   }
 
   #setEnabledAt(index: number, enabled: boolean): Promise<boolean> {
+    return this.#sendControl({
+      type: "set-enabled",
+      index,
+      enabled,
+    });
+  }
+
+  #updateEffectAt(
+    index: number,
+    id: string,
+    type: AudioEffectConfig["type"],
+    config: AudioEffectConfig,
+  ): Promise<boolean> {
+    validateAudioEffectConfig(config);
+    if (config.id !== id) {
+      throw new RangeError(
+        "live audio effect updates must preserve effect identity",
+      );
+    }
+    if (config.type !== type) {
+      throw new RangeError(
+        "live audio effect updates must preserve effect type",
+      );
+    }
+    return this.#sendControl({
+      type: "update-effect",
+      index,
+      effect: toRustEffectConfig(config),
+    });
+  }
+
+  #sendControl(message: WorkletControlRequest): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false);
     const requestId = ++this.#requestId;
     return new Promise((resolve) => {
@@ -246,30 +321,25 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
         resolve(false);
       }, this.#controlTimeoutMs);
       this.#pending.set(requestId, { resolve, timer });
-      this.node.port.postMessage({
-        type: 'set-enabled',
-        requestId,
-        index,
-        enabled,
-      });
+      this.node.port.postMessage({ ...message, requestId });
     });
   }
 
   #handleMessage(value: unknown): void {
     if (!isWorkletMessage(value)) return;
-    if (value.type === 'ready') {
+    if (value.type === "ready") {
       this.#resolveReady?.();
       this.#clearReadySettlers();
-      this.#emit({ type: 'ready' });
+      this.#emit({ type: "ready" });
       return;
     }
-    if (value.type === 'processor-error') {
+    if (value.type === "processor-error") {
       this.#fail(value.message);
       return;
     }
-    if (value.type === 'disposed') {
+    if (value.type === "disposed") {
       this.node.port.close();
-      this.#emit({ type: 'disposed' });
+      this.#emit({ type: "disposed" });
       return;
     }
     const pending = this.#pending.get(value.requestId);
@@ -288,7 +358,7 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
       pending.resolve(false);
     }
     this.#pending.clear();
-    this.#emit({ type: 'processor-error', message });
+    this.#emit({ type: "processor-error", message });
   }
 
   #clearReadySettlers(): void {
@@ -306,28 +376,42 @@ export class RustAudioWorkletEffectChain implements WebAudioEffectInsert {
 }
 
 type WorkletMessage =
-  | { readonly type: 'disposed' }
+  | { readonly type: "disposed" }
   | {
-      readonly type: 'enabled-set';
+      readonly type: "control-set";
       readonly requestId: number;
       readonly updated: boolean;
     }
-  | { readonly type: 'processor-error'; readonly message: string }
-  | { readonly type: 'ready' };
+  | { readonly type: "processor-error"; readonly message: string }
+  | { readonly type: "ready" };
 
 function isWorkletMessage(value: unknown): value is WorkletMessage {
-  if (typeof value !== 'object' || value === null || !('type' in value)) return false;
+  if (typeof value !== "object" || value === null || !("type" in value))
+    return false;
   const type = value.type;
-  if (type === 'disposed' || type === 'ready') return true;
-  if (type === 'processor-error') return 'message' in value && typeof value.message === 'string';
+  if (type === "disposed" || type === "ready") return true;
+  if (type === "processor-error")
+    return "message" in value && typeof value.message === "string";
   return (
-    type === 'enabled-set' &&
-    'requestId' in value &&
+    type === "control-set" &&
+    "requestId" in value &&
     Number.isSafeInteger(value.requestId) &&
-    'updated' in value &&
-    typeof value.updated === 'boolean'
+    "updated" in value &&
+    typeof value.updated === "boolean"
   );
 }
+
+type WorkletControlRequest =
+  | {
+      readonly type: "set-enabled";
+      readonly index: number;
+      readonly enabled: boolean;
+    }
+  | {
+      readonly type: "update-effect";
+      readonly index: number;
+      readonly effect: object;
+    };
 
 async function compileWasm(
   url: string | URL,
@@ -335,7 +419,9 @@ async function compileWasm(
 ): Promise<WebAssembly.Module> {
   const response = await fetchWasm(url);
   if (!response.ok) {
-    throw new Error(`failed to fetch Rust audio Wasm: ${String(response.status)}`);
+    throw new Error(
+      `failed to fetch Rust audio Wasm: ${String(response.status)}`,
+    );
   }
   return WebAssembly.compile(await response.arrayBuffer());
 }
@@ -343,36 +429,36 @@ async function compileWasm(
 function toRustEffectConfig(effect: AudioEffectConfig): object {
   const enabled = effect.enabled ?? true;
   switch (effect.type) {
-    case 'highpass':
-    case 'lowpass':
+    case "highpass":
+    case "lowpass":
       return {
-        type: 'filter',
+        type: "filter",
         enabled,
-        kind: effect.type === 'highpass' ? 0 : 1,
+        kind: effect.type === "highpass" ? 0 : 1,
         frequencyHz: effect.frequencyHz,
         q: effect.q ?? 0.707,
       };
-    case 'equalizer':
+    case "equalizer":
       return {
-        type: 'equalizer',
+        type: "equalizer",
         enabled,
         bands: effect.bands.map((band) => ({
-          kind: band.type === 'lowshelf' ? 0 : band.type === 'peaking' ? 1 : 2,
+          kind: band.type === "lowshelf" ? 0 : band.type === "peaking" ? 1 : 2,
           frequencyHz: band.frequencyHz,
           gainDb: band.gainDb,
           q: band.q ?? 0.707,
         })),
       };
-    case 'saturation':
+    case "saturation":
       return {
-        type: 'saturation',
+        type: "saturation",
         enabled,
         drive: effect.drive ?? 1,
         mix: effect.mix ?? 1,
       };
-    case 'compressor':
+    case "compressor":
       return {
-        type: 'compressor',
+        type: "compressor",
         enabled,
         thresholdDb: effect.thresholdDb ?? -24,
         kneeDb: effect.kneeDb ?? 30,
@@ -382,18 +468,18 @@ function toRustEffectConfig(effect: AudioEffectConfig): object {
         makeupGainDb: effect.makeupGainDb ?? 0,
         mix: effect.mix ?? 1,
       };
-    case 'delay':
+    case "delay":
       return {
-        type: 'delay',
+        type: "delay",
         enabled,
         delaySeconds: effect.delaySeconds,
         feedback: effect.feedback ?? 0.3,
         wet: effect.wet ?? 0.3,
         dry: effect.dry ?? 1,
       };
-    case 'reverb':
+    case "reverb":
       return {
-        type: 'reverb',
+        type: "reverb",
         enabled,
         roomSize: effect.roomSize ?? 0.5,
         damping: effect.damping ?? 0.3,
@@ -404,7 +490,12 @@ function toRustEffectConfig(effect: AudioEffectConfig): object {
   }
 }
 
-function integerBetween(value: number, minimum: number, maximum: number, name: string): number {
+function integerBetween(
+  value: number,
+  minimum: number,
+  maximum: number,
+  name: string,
+): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
     throw new RangeError(
       `${name} must be an integer between ${String(minimum)} and ${String(maximum)}`,
