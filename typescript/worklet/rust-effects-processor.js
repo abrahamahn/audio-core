@@ -8,8 +8,29 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.failed = false;
+    this.disposed = false;
+    this.engine = null;
+    const processorOptions = options.processorOptions;
+    this.channels = processorOptions?.channels ?? 1;
+    this.maxBlockFrames = processorOptions?.maxBlockFrames ?? 128;
+    this.port.onmessage = (event) => {
+      const message = event.data;
+      if (message?.type === 'dispose') {
+        this.engine?.free();
+        this.engine = null;
+        this.disposed = true;
+        this.port.postMessage({ type: 'disposed' });
+        return;
+      }
+      if (message?.type !== 'set-enabled') return;
+      const updated = this.engine?.set_enabled_at(message.index, message.enabled) ?? false;
+      this.port.postMessage({
+        type: 'enabled-set',
+        requestId: message.requestId,
+        updated,
+      });
+    };
     try {
-      const processorOptions = options.processorOptions;
       if (processorOptions === undefined) throw new Error('missing Rust effect processor options');
       if (!wasmInitialized) {
         initSync({ module: processorOptions.wasmModule });
@@ -25,22 +46,6 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
       this.fail(error instanceof Error ? error.message : String(error));
       return;
     }
-    this.port.onmessage = (event) => {
-      const message = event.data;
-      if (message?.type === 'dispose') {
-        this.engine.free();
-        this.failed = true;
-        this.port.postMessage({ type: 'disposed' });
-        return;
-      }
-      if (message?.type !== 'set-enabled') return;
-      const updated = this.engine.set_enabled_at(message.index, message.enabled);
-      this.port.postMessage({
-        type: 'enabled-set',
-        requestId: message.requestId,
-        updated,
-      });
-    };
     this.port.postMessage({ type: 'ready' });
   }
 
@@ -49,20 +54,25 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
-    if (this.failed) return false;
+    if (this.disposed) return false;
     const output = outputs[0];
     if (output === undefined || output.length === 0) return true;
     const frameCount = output[0]?.length ?? 0;
     if (frameCount === 0) return true;
+    const input = inputs[0];
+    if (this.failed || this.engine === null) {
+      copyInputToOutput(input, output);
+      return true;
+    }
     if (frameCount > this.maxBlockFrames) {
       this.fail(
         `render quantum ${String(frameCount)} exceeds ${String(this.maxBlockFrames)} frames`,
       );
-      return false;
+      copyInputToOutput(input, output);
+      return true;
     }
     if (this.buffer.buffer !== this.memory.buffer) this.buffer = this.createBufferView();
 
-    const input = inputs[0];
     for (let channel = 0; channel < this.channels; channel += 1) {
       const source =
         input === undefined || input.length === 0
@@ -77,7 +87,8 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
       if (!this.engine.process(frameCount)) throw new Error('Rust DSP rejected the render quantum');
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
-      return false;
+      copyInputToOutput(input, output);
+      return true;
     }
 
     for (let channel = 0; channel < output.length; channel += 1) {
@@ -94,6 +105,23 @@ class RustEffectsProcessor extends AudioWorkletProcessor {
   fail(message) {
     this.failed = true;
     this.port.postMessage({ type: 'processor-error', message });
+  }
+}
+
+function copyInputToOutput(input, output) {
+  for (let channel = 0; channel < output.length; channel += 1) {
+    const destination = output[channel];
+    if (destination === undefined) continue;
+    const source =
+      input === undefined || input.length === 0
+        ? undefined
+        : input[Math.min(channel, input.length - 1)];
+    if (source === undefined) {
+      destination.fill(0);
+    } else {
+      destination.fill(0);
+      destination.set(source.subarray(0, destination.length));
+    }
   }
 }
 

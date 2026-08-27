@@ -44,6 +44,32 @@ describe('Rust AudioWorklet renderer', () => {
     effects.dispose();
   });
 
+  it('keeps the audio graph alive as pass-through when DSP rejects a render quantum', async () => {
+    const sampleRate = 48_000;
+    const context = new OfflineAudioContext(1, 256, sampleRate);
+    const events: string[] = [];
+    const factory = await loadRustAudioWorklet(context, {
+      channels: 1,
+      maxBlockFrames: 1,
+      onEvent: (event) => events.push(event.type),
+    });
+    const effects = factory.createEffectChain([]);
+    const input = context.createBuffer(1, 256, sampleRate);
+    input.getChannelData(0)[0] = 0.75;
+    const source = context.createBufferSource();
+    source.buffer = input;
+    source.connect(effects.inputNode);
+    effects.outputNode.connect(context.destination);
+    source.start();
+
+    const rendering = context.startRendering();
+    await effects.ready;
+    const rendered = await rendering;
+    expect(rendered.getChannelData(0)[0]).toBeCloseTo(0.75, 4);
+    expect(events).toContain('processor-error');
+    effects.dispose();
+  });
+
   it('plugs a loaded Rust factory into master and channel output inserts', async () => {
     const context = new AudioContext();
     liveContexts.push(context);

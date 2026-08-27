@@ -2,11 +2,10 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     CompressorConfig, DelayConfig, EffectChain, EffectConfig, EqualizerBand, EqualizerBandKind,
-    EqualizerConfig, FilterConfig, FilterKind, ReverbConfig, SaturationConfig,
+    EqualizerConfig, FilterConfig, FilterKind, MAX_DSP_CHANNELS, ReverbConfig, SaturationConfig,
 };
 
 const MAX_BLOCK_FRAMES: usize = 4_096;
-const MAX_CHANNELS: usize = 32;
 
 /// Allocation-bounded Wasm bridge for an AudioWorklet render quantum.
 ///
@@ -31,7 +30,7 @@ impl WasmEffectChain {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: f32, channels: usize, max_frames: usize) -> Self {
         let dimensions_valid = channels > 0
-            && channels <= MAX_CHANNELS
+            && channels <= MAX_DSP_CHANNELS
             && max_frames > 0
             && max_frames <= MAX_BLOCK_FRAMES;
         let sample_capacity = dimensions_valid

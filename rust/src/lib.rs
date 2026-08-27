@@ -5,6 +5,12 @@ use std::error::Error;
 use std::f32::consts::PI;
 use std::fmt::{Display, Formatter};
 
+pub const MAX_DSP_CHANNELS: usize = 32;
+pub const MAX_DSP_EFFECTS: usize = 128;
+pub const MAX_DSP_SAMPLE_RATE: f32 = 384_000.0;
+/// At most 128 MiB of persistent `f32` delay/filter state per chain.
+pub const MAX_DSP_STATE_SAMPLES: usize = 33_554_432;
+
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod wasm;
 
@@ -131,6 +137,8 @@ pub enum EffectError {
     InvalidChannelCount,
     InvalidSampleRate,
     InvalidValue(&'static str),
+    ResourceBudgetExceeded,
+    TooManyEffects,
     TooManyEqualizerBands,
 }
 
@@ -143,11 +151,17 @@ impl Display for EffectError {
             Self::InvalidBufferShape => {
                 formatter.write_str("interleaved samples must contain complete frames")
             }
-            Self::InvalidChannelCount => formatter.write_str("channels must be greater than zero"),
+            Self::InvalidChannelCount => {
+                formatter.write_str("channels must be within the supported DSP range")
+            }
             Self::InvalidSampleRate => {
-                formatter.write_str("sample rate must be finite and greater than zero")
+                formatter.write_str("sample rate must be finite and within the supported DSP range")
             }
             Self::InvalidValue(field) => write!(formatter, "invalid audio effect value: {field}"),
+            Self::ResourceBudgetExceeded => {
+                formatter.write_str("audio effect chain exceeds its persistent DSP memory budget")
+            }
+            Self::TooManyEffects => formatter.write_str("audio effect chain has too many effects"),
             Self::TooManyEqualizerBands => {
                 formatter.write_str("equalizer supports at most 32 bands")
             }
@@ -163,6 +177,9 @@ impl Error for EffectError {}
 ///
 /// Returns [`EffectError`] when a field is outside the shared contract or an identity is invalid.
 pub fn validate_effect_chain(configs: &[EffectConfig]) -> Result<(), EffectError> {
+    if configs.len() > MAX_DSP_EFFECTS {
+        return Err(EffectError::TooManyEffects);
+    }
     let mut ids = HashSet::new();
     for config in configs {
         if config.id().trim().is_empty() {
@@ -246,13 +263,16 @@ impl EffectChain {
         channels: usize,
         configs: &[EffectConfig],
     ) -> Result<Self, EffectError> {
-        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        if !sample_rate.is_finite() || !(1.0..=MAX_DSP_SAMPLE_RATE).contains(&sample_rate) {
             return Err(EffectError::InvalidSampleRate);
         }
-        if channels == 0 {
+        if channels == 0 || channels > MAX_DSP_CHANNELS {
             return Err(EffectError::InvalidChannelCount);
         }
         validate_effect_chain(configs)?;
+        if effect_chain_state_samples(sample_rate, channels, configs)? > MAX_DSP_STATE_SAMPLES {
+            return Err(EffectError::ResourceBudgetExceeded);
+        }
         let processors = configs
             .iter()
             .map(|config| Processor::new(sample_rate, channels, config))
@@ -273,8 +293,18 @@ impl EffectChain {
             return Err(EffectError::InvalidBufferShape);
         }
         for frame in samples.chunks_exact_mut(self.channels) {
+            for sample in &mut *frame {
+                if !sample.is_finite() {
+                    *sample = 0.0;
+                }
+            }
             for processor in &mut self.processors {
                 processor.process_frame(frame);
+            }
+            for sample in frame {
+                if !sample.is_finite() {
+                    *sample = 0.0;
+                }
             }
         }
         Ok(())
@@ -305,6 +335,49 @@ impl EffectChain {
         processor.enabled = enabled;
         true
     }
+}
+
+fn effect_chain_state_samples(
+    sample_rate: f32,
+    channels: usize,
+    configs: &[EffectConfig],
+) -> Result<usize, EffectError> {
+    configs.iter().try_fold(0_usize, |total, config| {
+        let samples = match config {
+            EffectConfig::Filter(_) => channels,
+            EffectConfig::Equalizer(config) => checked_samples(channels, config.bands.len())?,
+            EffectConfig::Saturation(_) => 0,
+            EffectConfig::Compressor(_) => 1,
+            EffectConfig::Delay(config) => checked_samples(
+                channels,
+                seconds_to_samples(sample_rate, config.delay_seconds).max(1),
+            )?,
+            EffectConfig::Reverb(config) => {
+                let scale = 0.7 + config.room_size * 0.6;
+                let comb_lengths = [0.0297_f32, 0.0371, 0.0411, 0.0437]
+                    .into_iter()
+                    .map(|seconds| seconds_to_samples(sample_rate, seconds * scale).max(1))
+                    .try_fold(0_usize, |sum, length| {
+                        sum.checked_add(length)
+                            .ok_or(EffectError::ResourceBudgetExceeded)
+                    })?;
+                let pre_delay = seconds_to_samples(sample_rate, config.pre_delay_seconds);
+                let per_channel = comb_lengths
+                    .checked_add(pre_delay)
+                    .and_then(|value| value.checked_add(6))
+                    .ok_or(EffectError::ResourceBudgetExceeded)?;
+                checked_samples(channels, per_channel)?
+            }
+        };
+        total
+            .checked_add(samples)
+            .ok_or(EffectError::ResourceBudgetExceeded)
+    })
+}
+
+fn checked_samples(left: usize, right: usize) -> Result<usize, EffectError> {
+    left.checked_mul(right)
+        .ok_or(EffectError::ResourceBudgetExceeded)
 }
 
 enum ProcessorKind {

@@ -13,6 +13,10 @@ The crate owns DSP and validation, not device access, media decoding, browser li
 audio callback. It compiles for native Rust and `wasm32-unknown-unknown`. The TypeScript package's
 `./rust-audio-worklet` entrypoint provides the browser adapter and packaged Wasm artifact.
 
+Construction fails before processor allocation when the stream shape, effect count, or estimated
+persistent `f32` state exceeds the exported DSP limits. Non-finite PCM is replaced with silence
+before it can enter stateful processors.
+
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings

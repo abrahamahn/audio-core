@@ -1,7 +1,7 @@
 use audio_core::{
     CompressorConfig, DelayConfig, EffectChain, EffectConfig, EffectError, EqualizerBand,
-    EqualizerBandKind, EqualizerConfig, FilterConfig, FilterKind, ReverbConfig, SaturationConfig,
-    validate_effect_chain,
+    EqualizerBandKind, EqualizerConfig, FilterConfig, FilterKind, MAX_DSP_CHANNELS,
+    MAX_DSP_SAMPLE_RATE, ReverbConfig, SaturationConfig, validate_effect_chain,
 };
 
 const SAMPLE_RATE: f32 = 1_000.0;
@@ -280,4 +280,62 @@ fn rejects_partial_interleaved_frames() {
     assert!(chain.set_enabled_at(0, true));
     assert!(!chain.set_enabled_at(1, true));
     assert!(!chain.set_enabled("missing", false));
+}
+
+#[test]
+fn rejects_stream_shapes_and_delay_lines_outside_the_dsp_budget() {
+    assert!(matches!(
+        EffectChain::new(MAX_DSP_SAMPLE_RATE + 1.0, 1, &[]),
+        Err(EffectError::InvalidSampleRate)
+    ));
+    assert!(matches!(
+        EffectChain::new(48_000.0, MAX_DSP_CHANNELS + 1, &[]),
+        Err(EffectError::InvalidChannelCount)
+    ));
+    let huge_delay = EffectConfig::Delay(DelayConfig {
+        id: "bounded-delay".to_owned(),
+        enabled: true,
+        delay_seconds: 180.0,
+        feedback: 0.5,
+        wet: 0.5,
+        dry: 1.0,
+    });
+    assert!(matches!(
+        EffectChain::new(192_000.0, 32, &[huge_delay]),
+        Err(EffectError::ResourceBudgetExceeded)
+    ));
+}
+
+#[test]
+fn sanitizes_non_finite_pcm_before_it_can_poison_processor_state() {
+    let mut chain = EffectChain::new(
+        SAMPLE_RATE,
+        1,
+        &[
+            filter("lp", FilterKind::LowPass, 200.0),
+            EffectConfig::Compressor(CompressorConfig {
+                id: "comp".to_owned(),
+                enabled: true,
+                threshold_db: -20.0,
+                knee_db: 0.0,
+                ratio: 4.0,
+                attack_seconds: 0.0,
+                release_seconds: 0.1,
+                makeup_gain_db: 0.0,
+                mix: 1.0,
+            }),
+        ],
+    )
+    .expect("valid chain");
+    let mut hostile = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.5];
+    chain
+        .process_interleaved(&mut hostile)
+        .expect("complete frames");
+    assert!(hostile.iter().all(|sample| sample.is_finite()));
+
+    let mut recovery = [0.0; 128];
+    chain
+        .process_interleaved(&mut recovery)
+        .expect("complete frames");
+    assert!(recovery.iter().all(|sample| sample.is_finite()));
 }

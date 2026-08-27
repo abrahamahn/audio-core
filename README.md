@@ -78,7 +78,11 @@ domain event → application cue mapping → AudioCueRequest
 - Channel and master faders follow their insert effects so ducking and mute also control effect
   tails.
 - Rust processes complete interleaved frames in place without allocating in the audio loop.
+- Rust rejects stream shapes and effect chains that exceed fixed sample-rate, channel, effect-count,
+  or persistent-state memory budgets before allocating processor state.
+- Non-finite input samples are sanitized before reaching stateful DSP.
 - Worklet render calls reuse one fixed Wasm buffer and use numeric initialization/control calls.
+- A worklet DSP failure reports an error and remains alive as a transparent pass-through path.
 - Worklet and Wasm module loads are context-bound, coalesced, and retryable after failure.
 - The root module performs no global fetch, decode, clock, storage, DOM, or output operation.
 
