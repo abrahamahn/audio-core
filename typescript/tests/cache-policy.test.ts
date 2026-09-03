@@ -5,7 +5,7 @@ import { AudioAssetCache } from '../src/index.js';
 describe('AudioAssetCache resource policy', () => {
   it('bounds encoded and per-context decoded caches with LRU eviction', async () => {
     const fetchEncoded = vi.fn((url: string) => {
-      void url;
+      Boolean(url);
       return Promise.resolve(new ArrayBuffer(2));
     });
     const decode = vi.fn((_context: object, bytes: ArrayBuffer) =>
@@ -49,8 +49,8 @@ describe('AudioAssetCache resource policy', () => {
     const options = {
       fetchEncoded: () => Promise.resolve(null),
       decode: (context: object, bytes: ArrayBuffer) => {
-        void context;
-        void bytes;
+        Boolean(context);
+        Boolean(bytes);
         return Promise.resolve(null);
       },
     };
