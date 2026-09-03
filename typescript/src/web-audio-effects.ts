@@ -7,9 +7,11 @@ import {
   type AudioFilterEffectConfig,
   type AudioReverbEffectConfig,
   type AudioSaturationEffectConfig,
-} from './effects.js';
+} from "./effects.js";
 
-export interface WebAudioEffectHandleBase<Type extends AudioEffectConfig['type']> {
+export interface WebAudioEffectHandleBase<
+  Type extends AudioEffectConfig["type"],
+> {
   readonly id: string;
   readonly type: Type;
   readonly inputNode: GainNode;
@@ -17,17 +19,18 @@ export interface WebAudioEffectHandleBase<Type extends AudioEffectConfig['type']
   setEnabled(enabled: boolean): void;
 }
 
-export interface WebAudioFilterEffectHandle extends WebAudioEffectHandleBase<
-  'highpass' | 'lowpass'
-> {
+export interface WebAudioFilterEffectHandle
+  extends WebAudioEffectHandleBase<"highpass" | "lowpass"> {
   readonly filterNode: BiquadFilterNode;
 }
 
-export interface WebAudioEqualizerEffectHandle extends WebAudioEffectHandleBase<'equalizer'> {
+export interface WebAudioEqualizerEffectHandle
+  extends WebAudioEffectHandleBase<"equalizer"> {
   readonly bandNodes: readonly BiquadFilterNode[];
 }
 
-export interface WebAudioSaturationEffectHandle extends WebAudioEffectHandleBase<'saturation'> {
+export interface WebAudioSaturationEffectHandle
+  extends WebAudioEffectHandleBase<"saturation"> {
   readonly waveShaperNode: WaveShaperNode;
   readonly dryNode: GainNode;
   readonly wetNode: GainNode;
@@ -35,7 +38,8 @@ export interface WebAudioSaturationEffectHandle extends WebAudioEffectHandleBase
   setMix(mix: number): void;
 }
 
-export interface WebAudioCompressorEffectHandle extends WebAudioEffectHandleBase<'compressor'> {
+export interface WebAudioCompressorEffectHandle
+  extends WebAudioEffectHandleBase<"compressor"> {
   readonly compressorNode: DynamicsCompressorNode;
   readonly makeupNode: GainNode;
   readonly dryNode: GainNode;
@@ -44,7 +48,8 @@ export interface WebAudioCompressorEffectHandle extends WebAudioEffectHandleBase
   setMix(mix: number): void;
 }
 
-export interface WebAudioReverbEffectHandle extends WebAudioEffectHandleBase<'reverb'> {
+export interface WebAudioReverbEffectHandle
+  extends WebAudioEffectHandleBase<"reverb"> {
   readonly convolverNode: ConvolverNode;
   readonly preDelayNode: DelayNode;
   readonly dryNode: GainNode;
@@ -53,7 +58,8 @@ export interface WebAudioReverbEffectHandle extends WebAudioEffectHandleBase<'re
   setWet(wet: number): void;
 }
 
-export interface WebAudioDelayEffectHandle extends WebAudioEffectHandleBase<'delay'> {
+export interface WebAudioDelayEffectHandle
+  extends WebAudioEffectHandleBase<"delay"> {
   readonly delayNode: DelayNode;
   readonly feedbackNode: GainNode;
   readonly dryNode: GainNode;
@@ -73,7 +79,7 @@ export type WebAudioEffectHandle =
   | WebAudioSaturationEffectHandle;
 
 export interface WebAudioEffectInsert {
-  readonly backend: 'native' | 'rust-worklet';
+  readonly backend: "native" | "rust-worklet";
   readonly inputNode: AudioNode;
   readonly outputNode: AudioNode;
   readonly size: number;
@@ -82,8 +88,11 @@ export interface WebAudioEffectInsert {
 }
 
 export interface WebAudioEffectChainFactory {
-  readonly backend: WebAudioEffectInsert['backend'];
-  create(context: AudioContext, configs: readonly AudioEffectConfig[]): WebAudioEffectInsert;
+  readonly backend: WebAudioEffectInsert["backend"];
+  create(
+    context: AudioContext,
+    configs: readonly AudioEffectConfig[],
+  ): WebAudioEffectInsert;
 }
 
 interface EffectStage {
@@ -93,7 +102,7 @@ interface EffectStage {
 
 /** A serial insert chain that exposes native Web Audio nodes for live automation. */
 export class WebAudioEffectChain {
-  readonly backend = 'native' as const;
+  readonly backend = "native" as const;
   readonly inputNode: GainNode;
   readonly outputNode: GainNode;
   readonly #effects = new Map<string, WebAudioEffectHandle>();
@@ -149,25 +158,31 @@ export class WebAudioEffectChain {
   }
 }
 
-function createEffectStage(context: AudioContext, config: AudioEffectConfig): EffectStage {
+function createEffectStage(
+  context: AudioContext,
+  config: AudioEffectConfig,
+): EffectStage {
   switch (config.type) {
-    case 'highpass':
-    case 'lowpass':
+    case "highpass":
+    case "lowpass":
       return createFilterStage(context, config);
-    case 'equalizer':
+    case "equalizer":
       return createEqualizerStage(context, config);
-    case 'saturation':
+    case "saturation":
       return createSaturationStage(context, config);
-    case 'compressor':
+    case "compressor":
       return createCompressorStage(context, config);
-    case 'reverb':
+    case "reverb":
       return createReverbStage(context, config);
-    case 'delay':
+    case "delay":
       return createDelayStage(context, config);
   }
 }
 
-function createFilterStage(context: AudioContext, config: AudioFilterEffectConfig): EffectStage {
+function createFilterStage(
+  context: AudioContext,
+  config: AudioFilterEffectConfig,
+): EffectStage {
   const input = context.createGain();
   const output = context.createGain();
   const filter = context.createBiquadFilter();
@@ -216,12 +231,14 @@ function createEqualizerStage(
   for (let index = 0; index < bands.length - 1; index += 1) {
     const current = bands[index];
     const next = bands[index + 1];
-    if (current === undefined || next === undefined) throw new Error('invalid equalizer chain');
+    if (current === undefined || next === undefined)
+      throw new Error("invalid equalizer chain");
     current.connect(next);
   }
   const first = bands[0];
   const last = bands.at(-1);
-  if (first === undefined || last === undefined) throw new Error('equalizer requires a band');
+  if (first === undefined || last === undefined)
+    throw new Error("equalizer requires a band");
   last.connect(output);
   let enabled = config.enabled ?? true;
   const connectInput = (): void => {
@@ -232,7 +249,7 @@ function createEqualizerStage(
   return {
     handle: {
       id: config.id,
-      type: 'equalizer',
+      type: "equalizer",
       inputNode: input,
       outputNode: output,
       bandNodes: bands,
@@ -256,7 +273,7 @@ function createSaturationStage(
   const dry = context.createGain();
   const wet = context.createGain();
   const shaper = context.createWaveShaper();
-  shaper.oversample = config.oversample ?? '2x';
+  shaper.oversample = config.oversample ?? "2x";
   input.connect(dry).connect(output);
   input.connect(shaper).connect(wet).connect(output);
   let enabled = config.enabled ?? true;
@@ -266,7 +283,7 @@ function createSaturationStage(
     wet.gain.value = enabled ? mix : 0;
   };
   const setDrive = (drive: number): void => {
-    bounded(drive, 0, 100, 'drive');
+    bounded(drive, 0, 100, "drive");
     shaper.curve = saturationCurve(drive);
   };
   setDrive(config.drive ?? 1);
@@ -274,7 +291,7 @@ function createSaturationStage(
   return {
     handle: {
       id: config.id,
-      type: 'saturation',
+      type: "saturation",
       inputNode: input,
       outputNode: output,
       waveShaperNode: shaper,
@@ -282,7 +299,7 @@ function createSaturationStage(
       wetNode: wet,
       setDrive,
       setMix: (next) => {
-        bounded(next, 0, 1, 'mix');
+        bounded(next, 0, 1, "mix");
         mix = next;
         applyMix();
       },
@@ -321,7 +338,7 @@ function createCompressorStage(
     wet.gain.value = enabled ? mix : 0;
   };
   const setMakeupGainDb = (gainDb: number): void => {
-    bounded(gainDb, -24, 24, 'makeupGainDb');
+    bounded(gainDb, -24, 24, "makeupGainDb");
     makeup.gain.value = decibelsToGain(gainDb);
   };
   setMakeupGainDb(config.makeupGainDb ?? 0);
@@ -329,7 +346,7 @@ function createCompressorStage(
   return {
     handle: {
       id: config.id,
-      type: 'compressor',
+      type: "compressor",
       inputNode: input,
       outputNode: output,
       compressorNode: compressor,
@@ -338,7 +355,7 @@ function createCompressorStage(
       wetNode: wet,
       setMakeupGainDb,
       setMix: (next) => {
-        bounded(next, 0, 1, 'mix');
+        bounded(next, 0, 1, "mix");
         mix = next;
         applyMix();
       },
@@ -353,7 +370,10 @@ function createCompressorStage(
   };
 }
 
-function createReverbStage(context: AudioContext, config: AudioReverbEffectConfig): EffectStage {
+function createReverbStage(
+  context: AudioContext,
+  config: AudioReverbEffectConfig,
+): EffectStage {
   const input = context.createGain();
   const output = context.createGain();
   const dry = context.createGain();
@@ -380,7 +400,7 @@ function createReverbStage(context: AudioContext, config: AudioReverbEffectConfi
   return {
     handle: {
       id: config.id,
-      type: 'reverb',
+      type: "reverb",
       inputNode: input,
       outputNode: output,
       convolverNode: convolver,
@@ -388,12 +408,12 @@ function createReverbStage(context: AudioContext, config: AudioReverbEffectConfi
       dryNode: dry,
       wetNode: wet,
       setDry: (next) => {
-        bounded(next, 0, 1, 'dry');
+        bounded(next, 0, 1, "dry");
         dryLevel = next;
         applyMix();
       },
       setWet: (next) => {
-        bounded(next, 0, 1, 'wet');
+        bounded(next, 0, 1, "wet");
         wetLevel = next;
         applyMix();
       },
@@ -408,7 +428,10 @@ function createReverbStage(context: AudioContext, config: AudioReverbEffectConfi
   };
 }
 
-function createDelayStage(context: AudioContext, config: AudioDelayEffectConfig): EffectStage {
+function createDelayStage(
+  context: AudioContext,
+  config: AudioDelayEffectConfig,
+): EffectStage {
   const input = context.createGain();
   const output = context.createGain();
   const dry = context.createGain();
@@ -432,7 +455,7 @@ function createDelayStage(context: AudioContext, config: AudioDelayEffectConfig)
   return {
     handle: {
       id: config.id,
-      type: 'delay',
+      type: "delay",
       inputNode: input,
       outputNode: output,
       delayNode: delay,
@@ -440,20 +463,20 @@ function createDelayStage(context: AudioContext, config: AudioDelayEffectConfig)
       dryNode: dry,
       wetNode: wet,
       setDelaySeconds: (next) => {
-        bounded(next, 0.001, maximum, 'delaySeconds');
+        bounded(next, 0.001, maximum, "delaySeconds");
         delay.delayTime.value = next;
       },
       setFeedback: (next) => {
-        bounded(next, 0, 0.99, 'feedback');
+        bounded(next, 0, 0.99, "feedback");
         feedback.gain.value = next;
       },
       setDry: (next) => {
-        bounded(next, 0, 1, 'dry');
+        bounded(next, 0, 1, "dry");
         dryLevel = next;
         applyMix();
       },
       setWet: (next) => {
-        bounded(next, 0, 1, 'wet');
+        bounded(next, 0, 1, "wet");
         wetLevel = next;
         applyMix();
       },
@@ -519,8 +542,15 @@ function disconnectAll(...nodes: AudioNode[]): void {
   for (const node of nodes) node.disconnect();
 }
 
-function bounded(value: number, minimum: number, maximum: number, name: string): void {
+function bounded(
+  value: number,
+  minimum: number,
+  maximum: number,
+  name: string,
+): void {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${name} must be between ${String(minimum)} and ${String(maximum)}`);
+    throw new RangeError(
+      `${name} must be between ${String(minimum)} and ${String(maximum)}`,
+    );
   }
 }

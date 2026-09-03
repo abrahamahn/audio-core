@@ -1,0 +1,73 @@
+{
+  "profile": "audio-core-render-v1",
+  "sampleRate": 48000,
+  "frameCount": 2500,
+  "effects": [
+    {
+      "id": "filter",
+      "type": "lowpass",
+      "enabled": true,
+      "frequencyHz": 8000,
+      "q": 0.707
+    },
+    {
+      "id": "eq",
+      "type": "equalizer",
+      "enabled": true,
+      "bands": [
+        { "type": "peaking", "frequencyHz": 2000, "gainDb": 3, "q": 1 }
+      ]
+    },
+    { "id": "sat", "type": "saturation", "enabled": true, "drive": 3, "mix": 0.4 },
+    {
+      "id": "comp",
+      "type": "compressor",
+      "enabled": true,
+      "thresholdDb": -12,
+      "kneeDb": 6,
+      "ratio": 3,
+      "attackSeconds": 0,
+      "releaseSeconds": 0.1,
+      "makeupGainDb": 1,
+      "mix": 0.8
+    },
+    {
+      "id": "delay",
+      "type": "delay",
+      "enabled": true,
+      "delaySeconds": 0.005,
+      "feedback": 0.4,
+      "wet": 0.3,
+      "dry": 0.8
+    },
+    {
+      "id": "verb",
+      "type": "reverb",
+      "enabled": true,
+      "roomSize": 0,
+      "damping": 0.2,
+      "preDelaySeconds": 0,
+      "wet": 0.2,
+      "dry": 1
+    }
+  ],
+  "samples": [
+    { "frame": 0, "value": 0.185140893 },
+    { "frame": 1, "value": 0.316851884 },
+    { "frame": 2, "value": 0.309053898 },
+    { "frame": 3, "value": 0.147507086 },
+    { "frame": 4, "value": 0.027530244 },
+    { "frame": 5, "value": -0.012516391 },
+    { "frame": 10, "value": -0.024057478 },
+    { "frame": 20, "value": 0.001871743 },
+    { "frame": 100, "value": 0.000000660 },
+    { "frame": 239, "value": 0 },
+    { "frame": 240, "value": 0.069427840 },
+    { "frame": 241, "value": 0.118819460 },
+    { "frame": 480, "value": 0.027771136 },
+    { "frame": 998, "value": 0.009223326 },
+    { "frame": 1241, "value": 0.002756877 },
+    { "frame": 1782, "value": 0.000001335 },
+    { "frame": 2499, "value": 0.000077559 }
+  ]
+}

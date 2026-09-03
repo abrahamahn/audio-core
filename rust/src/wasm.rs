@@ -20,6 +20,7 @@ pub struct WasmEffectChain {
     buffer: Vec<f32>,
     configs: Vec<EffectConfig>,
     pending_equalizer: Option<EqualizerConfig>,
+    pending_equalizer_update: Option<(usize, EqualizerConfig)>,
     inner: Option<EffectChain>,
 }
 
@@ -44,6 +45,7 @@ impl WasmEffectChain {
             buffer: vec![0.0; sample_capacity],
             configs: Vec::new(),
             pending_equalizer: None,
+            pending_equalizer_update: None,
             inner: None,
         }
     }
@@ -230,6 +232,187 @@ impl WasmEffectChain {
             .as_mut()
             .is_some_and(|inner| inner.set_enabled_at(index, enabled))
     }
+
+    /// Replace a filter configuration at a stable chain position.
+    pub fn update_filter_at(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        kind: u8,
+        frequency_hz: f32,
+        q: f32,
+    ) -> bool {
+        let Some(kind) = filter_kind(kind) else {
+            return false;
+        };
+        self.apply_update(
+            index,
+            EffectConfig::Filter(FilterConfig {
+                id: index.to_string(),
+                enabled,
+                kind,
+                frequency_hz,
+                q,
+            }),
+        )
+    }
+
+    /// Start replacing an equalizer configuration at a stable chain position.
+    pub fn begin_equalizer_update(&mut self, index: usize, enabled: bool) -> bool {
+        if self.inner.is_none()
+            || self.pending_equalizer.is_some()
+            || self.pending_equalizer_update.is_some()
+        {
+            return false;
+        }
+        self.pending_equalizer_update = Some((
+            index,
+            EqualizerConfig {
+                id: index.to_string(),
+                enabled,
+                bands: Vec::new(),
+            },
+        ));
+        true
+    }
+
+    /// Add one band to an in-progress equalizer replacement.
+    pub fn add_equalizer_update_band(
+        &mut self,
+        kind: u8,
+        frequency_hz: f32,
+        gain_db: f32,
+        q: f32,
+    ) -> bool {
+        let Some(kind) = equalizer_kind(kind) else {
+            return false;
+        };
+        let Some((_, equalizer)) = &mut self.pending_equalizer_update else {
+            return false;
+        };
+        equalizer.bands.push(EqualizerBand {
+            kind,
+            frequency_hz,
+            gain_db,
+            q,
+        });
+        true
+    }
+
+    /// Commit an in-progress equalizer replacement.
+    pub fn finish_equalizer_update(&mut self) -> bool {
+        let Some((index, equalizer)) = self.pending_equalizer_update.take() else {
+            return false;
+        };
+        if equalizer.bands.is_empty() {
+            return false;
+        }
+        self.apply_update(index, EffectConfig::Equalizer(equalizer))
+    }
+
+    /// Discard an invalid or interrupted equalizer replacement.
+    pub fn cancel_equalizer_update(&mut self) {
+        self.pending_equalizer_update = None;
+    }
+
+    /// Replace a saturation configuration at a stable chain position.
+    pub fn update_saturation_at(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        drive: f32,
+        mix: f32,
+    ) -> bool {
+        self.apply_update(
+            index,
+            EffectConfig::Saturation(SaturationConfig {
+                id: index.to_string(),
+                enabled,
+                drive,
+                mix,
+            }),
+        )
+    }
+
+    /// Replace a compressor configuration at a stable chain position.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_compressor_at(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        threshold_db: f32,
+        knee_db: f32,
+        ratio: f32,
+        attack_seconds: f32,
+        release_seconds: f32,
+        makeup_gain_db: f32,
+        mix: f32,
+    ) -> bool {
+        self.apply_update(
+            index,
+            EffectConfig::Compressor(CompressorConfig {
+                id: index.to_string(),
+                enabled,
+                threshold_db,
+                knee_db,
+                ratio,
+                attack_seconds,
+                release_seconds,
+                makeup_gain_db,
+                mix,
+            }),
+        )
+    }
+
+    /// Replace a delay configuration at a stable chain position.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_delay_at(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        delay_seconds: f32,
+        feedback: f32,
+        wet: f32,
+        dry: f32,
+    ) -> bool {
+        self.apply_update(
+            index,
+            EffectConfig::Delay(DelayConfig {
+                id: index.to_string(),
+                enabled,
+                delay_seconds,
+                feedback,
+                wet,
+                dry,
+            }),
+        )
+    }
+
+    /// Replace a reverb configuration at a stable chain position.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_reverb_at(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        room_size: f32,
+        damping: f32,
+        pre_delay_seconds: f32,
+        wet: f32,
+        dry: f32,
+    ) -> bool {
+        self.apply_update(
+            index,
+            EffectConfig::Reverb(ReverbConfig {
+                id: index.to_string(),
+                enabled,
+                room_size,
+                damping,
+                pre_delay_seconds,
+                wet,
+                dry,
+            }),
+        )
+    }
 }
 
 impl WasmEffectChain {
@@ -238,7 +421,7 @@ impl WasmEffectChain {
     }
 
     fn can_configure(&self) -> bool {
-        self.inner.is_none()
+        self.inner.is_none() && self.pending_equalizer_update.is_none()
     }
 
     fn push(&mut self, config: EffectConfig) -> bool {
@@ -247,6 +430,12 @@ impl WasmEffectChain {
         }
         self.configs.push(config);
         true
+    }
+
+    fn apply_update(&mut self, index: usize, config: EffectConfig) -> bool {
+        self.inner
+            .as_mut()
+            .is_some_and(|inner| inner.update_effect_at(index, config).unwrap_or(false))
     }
 }
 

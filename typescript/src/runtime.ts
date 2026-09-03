@@ -1,19 +1,19 @@
-import type { AudioCueRequest } from './policy.js';
+import type { AudioCueRequest } from "./policy.js";
 import {
   type CueDropReason,
   type CuePlaybackDecision,
   CueScheduler,
   type PlannedAudioCue,
-} from './scheduler.js';
+} from "./scheduler.js";
 import {
   emitAudioTelemetry,
   type AudioCueRuntimeTelemetryEvent,
   type AudioTelemetrySink,
-} from './telemetry.js';
+} from "./telemetry.js";
 
 export type AudioCueIntent<Cue extends string> = Omit<
   AudioCueRequest<Cue>,
-  'scheduledAtMs' | 'delayMs'
+  "scheduledAtMs" | "delayMs"
 >;
 
 export interface AudioCueSequenceStep<Cue extends string> {
@@ -35,13 +35,13 @@ export interface AudioCueRuntimeOptions<Cue extends string> {
 }
 
 export type AudioCueDispatchResult<Voice extends StoppableAudioVoice> =
-  | Exclude<CuePlaybackDecision, { readonly status: 'ready' }>
+  | Exclude<CuePlaybackDecision, { readonly status: "ready" }>
   | {
-      readonly status: 'unavailable';
+      readonly status: "unavailable";
       readonly dueAtMs: number;
     }
   | {
-      readonly status: 'started';
+      readonly status: "started";
       readonly dueAtMs: number;
       readonly lateByMs: number;
       readonly voice: Voice;
@@ -54,28 +54,40 @@ export function planAudioSequence<Cue extends string>(
   steps: readonly AudioCueSequenceStep<Cue>[],
   startsAtMs: number,
 ): readonly PlannedAudioCue<Cue>[] {
-  if (!Number.isFinite(startsAtMs)) throw new RangeError('startsAtMs must be finite');
+  if (!Number.isFinite(startsAtMs))
+    throw new RangeError("startsAtMs must be finite");
   let previousOffset = Number.NEGATIVE_INFINITY;
   return steps.map(({ request, offsetMs }) => {
     if (!Number.isFinite(offsetMs) || offsetMs < 0) {
-      throw new RangeError('sequence offsetMs must be finite and non-negative');
+      throw new RangeError("sequence offsetMs must be finite and non-negative");
     }
     if (offsetMs < previousOffset) {
-      throw new RangeError('sequence offsets must be ordered');
+      throw new RangeError("sequence offsets must be ordered");
     }
     previousOffset = offsetMs;
-    return scheduler.plan({ ...request, scheduledAtMs: startsAtMs, delayMs: offsetMs }, startsAtMs);
+    return scheduler.plan(
+      { ...request, scheduledAtMs: startsAtMs, delayMs: offsetMs },
+      startsAtMs,
+    );
   });
 }
 
 /** Couples scheduler decisions to active voice cancellation without owning a renderer. */
-export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoice> {
+export class AudioCueRuntime<
+  Cue extends string,
+  Voice extends StoppableAudioVoice,
+> {
   readonly #scheduler: CueScheduler<Cue>;
-  readonly #telemetry: AudioTelemetrySink<AudioCueRuntimeTelemetryEvent<Cue>> | undefined;
+  readonly #telemetry:
+    | AudioTelemetrySink<AudioCueRuntimeTelemetryEvent<Cue>>
+    | undefined;
   readonly #active = new Set<Voice>();
   readonly #groups = new Map<string, Set<Voice>>();
 
-  constructor(scheduler: CueScheduler<Cue>, options: AudioCueRuntimeOptions<Cue> = {}) {
+  constructor(
+    scheduler: CueScheduler<Cue>,
+    options: AudioCueRuntimeOptions<Cue> = {},
+  ) {
     this.#scheduler = scheduler;
     this.#telemetry = options.telemetry;
   }
@@ -85,7 +97,9 @@ export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoi
   }
 
   activeVoiceCount(group?: string): number {
-    return group === undefined ? this.#active.size : (this.#groups.get(group)?.size ?? 0);
+    return group === undefined
+      ? this.#active.size
+      : (this.#groups.get(group)?.size ?? 0);
   }
 
   dispatch(
@@ -94,27 +108,33 @@ export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoi
     start: (request: AudioCueRequest<Cue>) => Voice | null,
   ): AudioCueDispatchResult<Voice> {
     const decision = this.#scheduler.inspect(planned, nowMs);
-    if (decision.status !== 'ready') {
-      if (decision.status === 'drop') {
+    if (decision.status !== "ready") {
+      if (decision.status === "drop") {
         this.#emitDrop(planned.request, decision.reason);
       }
       return decision;
     }
     const voice = start(planned.request);
     if (voice === null) {
-      this.#emitDrop(planned.request, 'unavailable');
-      return { status: 'unavailable', dueAtMs: decision.dueAtMs };
+      this.#emitDrop(planned.request, "unavailable");
+      return { status: "unavailable", dueAtMs: decision.dueAtMs };
     }
-    this.#scheduler.markPlayed(planned.request.cue, nowMs, planned.request.eventId);
+    this.#scheduler.markPlayed(
+      planned.request.cue,
+      nowMs,
+      planned.request.eventId,
+    );
     const playback = this.#track(voice, planned.request.cancellationGroup);
     emitAudioTelemetry(this.#telemetry, {
-      type: 'cue.started',
+      type: "cue.started",
       cue: planned.request.cue,
-      ...(planned.request.eventId === undefined ? {} : { eventId: planned.request.eventId }),
+      ...(planned.request.eventId === undefined
+        ? {}
+        : { eventId: planned.request.eventId }),
       lateByMs: decision.lateByMs,
     });
     return {
-      status: 'started',
+      status: "started",
       dueAtMs: decision.dueAtMs,
       lateByMs: decision.lateByMs,
       voice,
@@ -130,7 +150,7 @@ export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoi
       for (const voice of [...voices]) this.#stop(voice);
     }
     emitAudioTelemetry(this.#telemetry, {
-      type: 'cue.group-cancelled',
+      type: "cue.group-cancelled",
       group,
       stoppedVoices: count,
     });
@@ -154,7 +174,7 @@ export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoi
 
   #track(voice: Voice, group: string | undefined): TrackedAudioPlayback {
     this.#active.add(voice);
-    if (group !== undefined && group !== '') {
+    if (group !== undefined && group !== "") {
       const voices = this.#groups.get(group) ?? new Set();
       voices.add(voice);
       this.#groups.set(group, voices);
@@ -186,9 +206,12 @@ export class AudioCueRuntime<Cue extends string, Voice extends StoppableAudioVoi
     }
   }
 
-  #emitDrop(request: AudioCueRequest<Cue>, reason: CueDropReason | 'unavailable'): void {
+  #emitDrop(
+    request: AudioCueRequest<Cue>,
+    reason: CueDropReason | "unavailable",
+  ): void {
     emitAudioTelemetry(this.#telemetry, {
-      type: 'cue.dropped',
+      type: "cue.dropped",
       cue: request.cue,
       ...(request.eventId === undefined ? {} : { eventId: request.eventId }),
       reason,

@@ -1,9 +1,9 @@
-import { audioActivationAllowsPlayback } from './policy.js';
+import { audioActivationAllowsPlayback } from "./policy.js";
 import {
   emitAudioTelemetry,
   type AudioContextTelemetryEvent,
   type AudioTelemetrySink,
-} from './telemetry.js';
+} from "./telemetry.js";
 
 export interface RecoverableAudioContext {
   readonly state: string;
@@ -11,7 +11,9 @@ export interface RecoverableAudioContext {
   close?(): Promise<unknown>;
 }
 
-export interface AudioContextLifecycleOptions<Context extends RecoverableAudioContext> {
+export interface AudioContextLifecycleOptions<
+  Context extends RecoverableAudioContext,
+> {
   readonly createContext: () => Context | null;
   readonly onResumeError?: (error: unknown, context: Context) => void;
   readonly telemetry?: AudioTelemetrySink<AudioContextTelemetryEvent>;
@@ -20,8 +22,12 @@ export interface AudioContextLifecycleOptions<Context extends RecoverableAudioCo
 /** Owns one recoverable context without depending on browser globals. */
 export class AudioContextLifecycle<Context extends RecoverableAudioContext> {
   readonly #createContext: () => Context | null;
-  readonly #onResumeError: ((error: unknown, context: Context) => void) | undefined;
-  readonly #telemetry: AudioTelemetrySink<AudioContextTelemetryEvent> | undefined;
+  readonly #onResumeError:
+    | ((error: unknown, context: Context) => void)
+    | undefined;
+  readonly #telemetry:
+    | AudioTelemetrySink<AudioContextTelemetryEvent>
+    | undefined;
   #context: Context | null = null;
   #resume: Promise<void> | null = null;
 
@@ -32,28 +38,32 @@ export class AudioContextLifecycle<Context extends RecoverableAudioContext> {
   }
 
   get current(): Context | null {
-    return this.#context?.state === 'closed' ? null : this.#context;
+    return this.#context?.state === "closed" ? null : this.#context;
   }
 
   acquire(activation?: { readonly hasBeenActive: boolean }): Context | null {
     if (!audioActivationAllowsPlayback(activation)) return null;
-    if (this.#context?.state === 'closed') {
+    if (this.#context?.state === "closed") {
       this.#context = null;
       this.#resume = null;
     }
     if (this.#context === null) {
       this.#context = this.#createContext();
       if (this.#context !== null) {
-        emitAudioTelemetry(this.#telemetry, { type: 'context.created' });
+        emitAudioTelemetry(this.#telemetry, { type: "context.created" });
       }
     }
     const context = this.#context;
     if (context === null) return null;
-    if (context.state !== 'running' && context.state !== 'closed' && this.#resume === null) {
-      emitAudioTelemetry(this.#telemetry, { type: 'context.resume-requested' });
+    if (
+      context.state !== "running" &&
+      context.state !== "closed" &&
+      this.#resume === null
+    ) {
+      emitAudioTelemetry(this.#telemetry, { type: "context.resume-requested" });
       const resume = context.resume().then(
         () => {
-          emitAudioTelemetry(this.#telemetry, { type: 'context.resumed' });
+          emitAudioTelemetry(this.#telemetry, { type: "context.resumed" });
         },
         (error: unknown) => {
           try {
@@ -61,7 +71,9 @@ export class AudioContextLifecycle<Context extends RecoverableAudioContext> {
           } catch {
             // A diagnostic callback must not break context recovery.
           }
-          emitAudioTelemetry(this.#telemetry, { type: 'context.resume-failed' });
+          emitAudioTelemetry(this.#telemetry, {
+            type: "context.resume-failed",
+          });
         },
       );
       this.#resume = resume;
@@ -82,7 +94,8 @@ export class AudioContextLifecycle<Context extends RecoverableAudioContext> {
   async close(): Promise<void> {
     const context = this.#context;
     this.clear();
-    if (context?.state !== 'closed') await context?.close?.();
-    if (context !== null) emitAudioTelemetry(this.#telemetry, { type: 'context.closed' });
+    if (context?.state !== "closed") await context?.close?.();
+    if (context !== null)
+      emitAudioTelemetry(this.#telemetry, { type: "context.closed" });
   }
 }

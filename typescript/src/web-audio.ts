@@ -5,21 +5,21 @@ import {
   type AudioOutputChannelConfig,
   type AudioOutputTopology,
   type AudioVoiceOverflowPolicy,
-} from './output.js';
-import { validateAudioEffectChain, type AudioEffectConfig } from './effects.js';
-import { clampAudioLevel, clampPan } from './policy.js';
+} from "./output.js";
+import { validateAudioEffectChain, type AudioEffectConfig } from "./effects.js";
+import { clampAudioLevel, clampPan } from "./policy.js";
 import {
   emitAudioTelemetry,
   type AudioOutputSourceKind,
   type AudioOutputTelemetryEvent,
   type AudioStreamTelemetryEvent,
   type AudioTelemetrySink,
-} from './telemetry.js';
+} from "./telemetry.js";
 import {
   WebAudioEffectChain,
   type WebAudioEffectChainFactory,
   type WebAudioEffectInsert,
-} from './web-audio-effects.js';
+} from "./web-audio-effects.js";
 
 export interface WebAudioOutputOptions<Channel extends string = string> {
   readonly destination?: AudioNode;
@@ -29,7 +29,9 @@ export interface WebAudioOutputOptions<Channel extends string = string> {
   /** Serial insert effects placed on the master bus before its fader and final limiter. */
   readonly masterEffects?: readonly AudioEffectConfig[];
   /** Serial insert effects placed before an individual channel fader. */
-  readonly channelEffects?: Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>;
+  readonly channelEffects?: Partial<
+    Readonly<Record<Channel, readonly AudioEffectConfig[]>>
+  >;
   /** Optional preloaded renderer for every configured effect chain. Native Web Audio is default. */
   readonly effectChainFactory?: WebAudioEffectChainFactory | undefined;
   readonly telemetry?: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>>;
@@ -41,9 +43,8 @@ export interface WebAudioRouteOptions<Channel extends string> {
   readonly pan?: number;
 }
 
-export interface WebAudioBufferPlayOptions<
-  Channel extends string,
-> extends WebAudioRouteOptions<Channel> {
+export interface WebAudioBufferPlayOptions<Channel extends string>
+  extends WebAudioRouteOptions<Channel> {
   readonly when?: number;
   readonly offset?: number;
   readonly duration?: number;
@@ -57,9 +58,8 @@ export interface AudioOutputConnection<Channel extends string> {
   disconnect(): void;
 }
 
-export interface WebAudioBufferVoice<
-  Channel extends string,
-> extends AudioOutputConnection<Channel> {
+export interface WebAudioBufferVoice<Channel extends string>
+  extends AudioOutputConnection<Channel> {
   readonly source: AudioBufferSourceNode;
   stop(): void;
 }
@@ -98,9 +98,14 @@ export class WebAudioOutput<Channel extends string> {
     | Partial<Readonly<Record<Channel, readonly AudioEffectConfig[]>>>
     | undefined;
   readonly #effectChainFactory: WebAudioEffectChainFactory | undefined;
-  readonly #telemetry: AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>> | undefined;
+  readonly #telemetry:
+    | AudioTelemetrySink<AudioOutputTelemetryEvent<Channel>>
+    | undefined;
   readonly #channels = new Map<Channel, ChannelState>();
-  readonly #mediaSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
+  readonly #mediaSources = new WeakMap<
+    HTMLMediaElement,
+    MediaElementAudioSourceNode
+  >();
   #disposed = false;
 
   constructor(
@@ -122,11 +127,12 @@ export class WebAudioOutput<Channel extends string> {
       options.masterEffects,
       options.effectChainFactory,
     );
-    if (this.#masterEffects !== null) this.#masterEffects.outputNode.connect(this.#master);
+    if (this.#masterEffects !== null)
+      this.#masterEffects.outputNode.connect(this.#master);
     if (
       options.limiter !== undefined &&
       options.limiter !== false &&
-      typeof context.createDynamicsCompressor === 'function'
+      typeof context.createDynamicsCompressor === "function"
     ) {
       this.#limiter = context.createDynamicsCompressor();
       configureLimiter(this.#limiter, options.limiter);
@@ -147,7 +153,9 @@ export class WebAudioOutput<Channel extends string> {
   }
 
   get masterEffectChain(): WebAudioEffectChain | null {
-    return this.#masterEffects instanceof WebAudioEffectChain ? this.#masterEffects : null;
+    return this.#masterEffects instanceof WebAudioEffectChain
+      ? this.#masterEffects
+      : null;
   }
 
   /** The active effect insert, including a Rust worklet insert when configured. */
@@ -180,11 +188,14 @@ export class WebAudioOutput<Channel extends string> {
   }
 
   /** Temporarily lower selected channels, then recover each one to its configured base level. */
-  duck(targets: readonly AudioDuckTarget<Channel>[], envelope: AudioDuckingEnvelope): void {
+  duck(
+    targets: readonly AudioDuckTarget<Channel>[],
+    envelope: AudioDuckingEnvelope,
+  ): void {
     this.#assertActive();
-    const attackSeconds = milliseconds(envelope.attackMs, 'attackMs');
-    const holdSeconds = milliseconds(envelope.holdMs, 'holdMs');
-    const releaseSeconds = milliseconds(envelope.releaseMs, 'releaseMs');
+    const attackSeconds = milliseconds(envelope.attackMs, "attackMs");
+    const holdSeconds = milliseconds(envelope.holdMs, "holdMs");
+    const releaseSeconds = milliseconds(envelope.releaseMs, "releaseMs");
     const now = this.#context.currentTime;
     const duckedAt = now + attackSeconds;
     const recoverAt = duckedAt + holdSeconds;
@@ -199,7 +210,7 @@ export class WebAudioOutput<Channel extends string> {
       gain.linearRampToValueAtTime(state.baseLevel, recoverAt + releaseSeconds);
     }
     emitAudioTelemetry(this.#telemetry, {
-      type: 'output.duck',
+      type: "output.duck",
       atMs: now * 1_000,
       channels: targets.map(({ channel }) => channel),
     });
@@ -214,7 +225,7 @@ export class WebAudioOutput<Channel extends string> {
     source: AudioNode,
     options: WebAudioRouteOptions<Channel>,
   ): AudioOutputConnection<Channel> | null {
-    return this.#connectSource(source, options, 'node');
+    return this.#connectSource(source, options, "node");
   }
 
   /** Create or reuse a MediaElement source. The caller retains play/pause and URL ownership. */
@@ -228,7 +239,7 @@ export class WebAudioOutput<Channel extends string> {
       source = this.#context.createMediaElementSource(element);
       this.#mediaSources.set(element, source);
     }
-    return this.#connectSource(source, options, 'stream');
+    return this.#connectSource(source, options, "stream");
   }
 
   /** Create and start one buffer voice. Repeated calls can play concurrently within channel policy. */
@@ -240,20 +251,21 @@ export class WebAudioOutput<Channel extends string> {
     const when = options.when ?? 0;
     const offset = options.offset;
     const duration = options.duration;
-    nonNegativeFinite(when, 'when');
-    if (offset !== undefined) nonNegativeFinite(offset, 'offset');
-    if (duration !== undefined) nonNegativeFinite(duration, 'duration');
+    nonNegativeFinite(when, "when");
+    if (offset !== undefined) nonNegativeFinite(offset, "offset");
+    if (duration !== undefined) nonNegativeFinite(duration, "duration");
     if (options.playbackRate !== undefined) {
-      positiveFinite(options.playbackRate, 'playbackRate');
+      positiveFinite(options.playbackRate, "playbackRate");
     }
 
     const source = this.#context.createBufferSource();
     source.buffer = buffer;
     source.loop = options.loop ?? false;
-    if (options.playbackRate !== undefined) source.playbackRate.value = options.playbackRate;
+    if (options.playbackRate !== undefined)
+      source.playbackRate.value = options.playbackRate;
 
     let ended = false;
-    const connection = this.#connectSource(source, options, 'buffer', () => {
+    const connection = this.#connectSource(source, options, "buffer", () => {
       if (ended) return;
       try {
         source.stop();
@@ -348,18 +360,23 @@ export class WebAudioOutput<Channel extends string> {
     const trim = this.#context.createGain();
     trim.gain.value = clampAudioLevel(options.level ?? 1);
     const panner =
-      typeof this.#context.createStereoPanner === 'function'
+      typeof this.#context.createStereoPanner === "function"
         ? this.#context.createStereoPanner()
         : null;
     if (panner !== null) panner.pan.value = clampPan(options.pan ?? 0);
 
     const setLevel = (level: number, rampMs = 0): void => {
-      const rampSeconds = milliseconds(rampMs, 'rampMs');
+      const rampSeconds = milliseconds(rampMs, "rampMs");
       const now = this.#context.currentTime;
       trim.gain.cancelScheduledValues(now);
       trim.gain.setValueAtTime(trim.gain.value, now);
-      if (rampSeconds === 0) trim.gain.setValueAtTime(clampAudioLevel(level), now);
-      else trim.gain.linearRampToValueAtTime(clampAudioLevel(level), now + rampSeconds);
+      if (rampSeconds === 0)
+        trim.gain.setValueAtTime(clampAudioLevel(level), now);
+      else
+        trim.gain.linearRampToValueAtTime(
+          clampAudioLevel(level),
+          now + rampSeconds,
+        );
     };
 
     let admitted = false;
@@ -382,7 +399,7 @@ export class WebAudioOutput<Channel extends string> {
       if (started) {
         started = false;
         emitAudioTelemetry(this.#telemetry, {
-          type: 'output.voice-stopped',
+          type: "output.voice-stopped",
           atMs: this.#context.currentTime * 1_000,
           channel: options.channel,
           source: sourceKind,
@@ -393,11 +410,11 @@ export class WebAudioOutput<Channel extends string> {
     const slot: ActiveSlot = { terminate: disconnect };
     if (!this.#admit(state, slot)) {
       emitAudioTelemetry(this.#telemetry, {
-        type: 'output.voice-dropped',
+        type: "output.voice-dropped",
         atMs: this.#context.currentTime * 1_000,
         channel: options.channel,
         source: sourceKind,
-        reason: 'capacity',
+        reason: "capacity",
         activeVoices: state.active.size,
       });
       return null;
@@ -414,7 +431,7 @@ export class WebAudioOutput<Channel extends string> {
       connected = true;
       started = true;
       emitAudioTelemetry(this.#telemetry, {
-        type: 'output.voice-started',
+        type: "output.voice-started",
         atMs: this.#context.currentTime * 1_000,
         channel: options.channel,
         source: sourceKind,
@@ -429,7 +446,7 @@ export class WebAudioOutput<Channel extends string> {
 
   #admit(state: ChannelState, slot: ActiveSlot): boolean {
     if (state.active.size >= state.config.maxVoices) {
-      if (state.config.overflow === 'reject-new') return false;
+      if (state.config.overflow === "reject-new") return false;
       state.active.values().next().value?.terminate();
     }
     state.active.add(slot);
@@ -438,12 +455,13 @@ export class WebAudioOutput<Channel extends string> {
 
   #channel(channel: Channel): ChannelState {
     const state = this.#channels.get(channel);
-    if (state === undefined) throw new RangeError(`unknown audio channel: ${channel}`);
+    if (state === undefined)
+      throw new RangeError(`unknown audio channel: ${channel}`);
     return state;
   }
 
   #assertActive(): void {
-    if (this.#disposed) throw new Error('audio output is disposed');
+    if (this.#disposed) throw new Error("audio output is disposed");
   }
 }
 
@@ -453,7 +471,10 @@ function createOptionalEffectChain(
   factory: WebAudioEffectChainFactory | undefined,
 ): WebAudioEffectInsert | null {
   if (effects === undefined || effects.length === 0) return null;
-  return factory?.create(context, effects) ?? new WebAudioEffectChain(context, effects);
+  return (
+    factory?.create(context, effects) ??
+    new WebAudioEffectChain(context, effects)
+  );
 }
 
 function validateEffectOptions<Channel extends string>(
@@ -462,9 +483,13 @@ function validateEffectOptions<Channel extends string>(
 ): void {
   validateAudioEffectChain(options.masterEffects ?? []);
   const knownChannels = new Set(channels.map(([channel]) => channel));
-  for (const [channel, effects] of Object.entries(options.channelEffects ?? {})) {
+  for (const [channel, effects] of Object.entries(
+    options.channelEffects ?? {},
+  )) {
     if (!knownChannels.has(channel as Channel)) {
-      throw new RangeError(`effects configured for unknown audio channel: ${channel}`);
+      throw new RangeError(
+        `effects configured for unknown audio channel: ${channel}`,
+      );
     }
     validateAudioEffectChain(effects as readonly AudioEffectConfig[]);
   }
@@ -482,12 +507,10 @@ export {
   type WebAudioFilterEffectHandle,
   type WebAudioReverbEffectHandle,
   type WebAudioSaturationEffectHandle,
-} from './web-audio-effects.js';
+} from "./web-audio-effects.js";
 
-export interface WebAudioStreamControllerOptions<Channel extends string> extends Omit<
-  WebAudioOutputOptions<Channel>,
-  'telemetry'
-> {
+export interface WebAudioStreamControllerOptions<Channel extends string>
+  extends Omit<WebAudioOutputOptions<Channel>, "telemetry"> {
   readonly channel: Channel;
   readonly defaultCrossfadeMs?: number;
   readonly readyTimeoutMs?: number;
@@ -521,7 +544,9 @@ export class WebAudioStreamController<Channel extends string> {
   readonly #defaultCrossfadeMs: number;
   readonly #readyTimeoutMs: number;
   readonly #telemetry:
-    | AudioTelemetrySink<AudioOutputTelemetryEvent<Channel> | AudioStreamTelemetryEvent<Channel>>
+    | AudioTelemetrySink<
+        AudioOutputTelemetryEvent<Channel> | AudioStreamTelemetryEvent<Channel>
+      >
     | undefined;
   readonly #pending = new Map<HTMLMediaElement, PendingStream<Channel>>();
   #replacementQueue: Promise<void> = Promise.resolve();
@@ -530,17 +555,26 @@ export class WebAudioStreamController<Channel extends string> {
   #resumeAfterVisibility = false;
   #disposed = false;
 
-  constructor(context: AudioContext, options: WebAudioStreamControllerOptions<Channel>) {
+  constructor(
+    context: AudioContext,
+    options: WebAudioStreamControllerOptions<Channel>,
+  ) {
     this.#channel = options.channel;
     this.#telemetry = options.telemetry;
-    this.#defaultCrossfadeMs = nonNegative(options.defaultCrossfadeMs ?? 0, 'defaultCrossfadeMs');
-    this.#readyTimeoutMs = nonNegative(options.readyTimeoutMs ?? 10_000, 'readyTimeoutMs');
+    this.#defaultCrossfadeMs = nonNegative(
+      options.defaultCrossfadeMs ?? 0,
+      "defaultCrossfadeMs",
+    );
+    this.#readyTimeoutMs = nonNegative(
+      options.readyTimeoutMs ?? 10_000,
+      "readyTimeoutMs",
+    );
     this.#output = new WebAudioOutput(
       context,
       {
-        mode: 'multi-channel',
+        mode: "multi-channel",
         channels: {
-          [options.channel]: { maxVoices: 2, overflow: 'stop-oldest' },
+          [options.channel]: { maxVoices: 2, overflow: "stop-oldest" },
         } as Record<Channel, AudioOutputChannelConfig>,
       },
       options,
@@ -555,13 +589,19 @@ export class WebAudioStreamController<Channel extends string> {
     return this.#current?.element ?? null;
   }
 
-  replace(element: HTMLMediaElement, options: WebAudioStreamReplaceOptions = {}): Promise<boolean> {
+  replace(
+    element: HTMLMediaElement,
+    options: WebAudioStreamReplaceOptions = {},
+  ): Promise<boolean> {
     this.#assertActive();
     const level = clampAudioLevel(options.level ?? 1);
-    const crossfadeMs = nonNegative(options.crossfadeMs ?? this.#defaultCrossfadeMs, 'crossfadeMs');
+    const crossfadeMs = nonNegative(
+      options.crossfadeMs ?? this.#defaultCrossfadeMs,
+      "crossfadeMs",
+    );
     const readyTimeoutMs = nonNegative(
       options.readyTimeoutMs ?? this.#readyTimeoutMs,
-      'readyTimeoutMs',
+      "readyTimeoutMs",
     );
     const autoplay = options.autoplay ?? true;
     const replacement = this.#replacementQueue.then(() =>
@@ -581,14 +621,14 @@ export class WebAudioStreamController<Channel extends string> {
     readyTimeoutMs: number,
     autoplay: boolean,
   ): Promise<boolean> {
-    if (this.#disposed) return this.#replaceFailed('disposed');
+    if (this.#disposed) return this.#replaceFailed("disposed");
     if (this.#current?.element === element) {
       this.#current.connection.setLevel(level, crossfadeMs);
       if (!autoplay) return true;
       const started = await playMedia(element);
       if (started && this.#hasBeenDisposed()) element.pause();
-      if (!started) return this.#replaceFailed('autoplay');
-      if (this.#hasBeenDisposed()) return this.#replaceFailed('disposed');
+      if (!started) return this.#replaceFailed("autoplay");
+      if (this.#hasBeenDisposed()) return this.#replaceFailed("disposed");
       return true;
     }
 
@@ -596,29 +636,38 @@ export class WebAudioStreamController<Channel extends string> {
     const previous = this.#current;
     const readinessAbort = new AbortController();
     this.#readinessAbort = readinessAbort;
-    const ready = await waitForMedia(element, readyTimeoutMs, readinessAbort.signal);
+    const ready = await waitForMedia(
+      element,
+      readyTimeoutMs,
+      readinessAbort.signal,
+    );
     if (this.#readinessAbort === readinessAbort) this.#readinessAbort = null;
-    if (!ready) return this.#replaceFailed(this.#hasBeenDisposed() ? 'disposed' : 'not-ready');
-    if (this.#hasBeenDisposed()) return this.#replaceFailed('disposed');
+    if (!ready)
+      return this.#replaceFailed(
+        this.#hasBeenDisposed() ? "disposed" : "not-ready",
+      );
+    if (this.#hasBeenDisposed()) return this.#replaceFailed("disposed");
     const initialLevel = previous === null || crossfadeMs === 0 ? level : 0;
     const connection = this.#output.connectMediaElement(element, {
       channel: this.#channel,
       level: initialLevel,
     });
-    if (connection === null) return this.#replaceFailed('capacity');
+    if (connection === null) return this.#replaceFailed("capacity");
     if (autoplay) {
       const started = await playMedia(element);
       if (!started || this.#hasBeenDisposed()) {
         connection.disconnect();
         if (started) element.pause();
-        return this.#replaceFailed(this.#hasBeenDisposed() ? 'disposed' : 'autoplay');
+        return this.#replaceFailed(
+          this.#hasBeenDisposed() ? "disposed" : "autoplay",
+        );
       }
     }
 
     this.#current = { element, connection, level };
     this.#resumeAfterVisibility = false;
     emitAudioTelemetry(this.#telemetry, {
-      type: 'stream.replaced',
+      type: "stream.replaced",
       channel: this.#channel,
       crossfadeMs: previous === null ? 0 : crossfadeMs,
     });
@@ -650,7 +699,7 @@ export class WebAudioStreamController<Channel extends string> {
     this.#resumeAfterVisibility ||= !element.paused;
     element.pause();
     emitAudioTelemetry(this.#telemetry, {
-      type: 'stream.suspended',
+      type: "stream.suspended",
       channel: this.#channel,
     });
   }
@@ -667,12 +716,12 @@ export class WebAudioStreamController<Channel extends string> {
     if (resumed) {
       this.#resumeAfterVisibility = false;
       emitAudioTelemetry(this.#telemetry, {
-        type: 'stream.resumed',
+        type: "stream.resumed",
         channel: this.#channel,
       });
     } else {
       emitAudioTelemetry(this.#telemetry, {
-        type: 'stream.resume-failed',
+        type: "stream.resume-failed",
         channel: this.#channel,
       });
     }
@@ -680,7 +729,7 @@ export class WebAudioStreamController<Channel extends string> {
   }
 
   async setVisibility(visibilityState: string): Promise<boolean> {
-    if (visibilityState !== 'visible') {
+    if (visibilityState !== "visible") {
       this.suspend();
       return true;
     }
@@ -713,7 +762,7 @@ export class WebAudioStreamController<Channel extends string> {
   }
 
   #assertActive(): void {
-    if (this.#disposed) throw new Error('audio stream controller is disposed');
+    if (this.#disposed) throw new Error("audio stream controller is disposed");
   }
 
   #hasBeenDisposed(): boolean {
@@ -723,11 +772,11 @@ export class WebAudioStreamController<Channel extends string> {
   #replaceFailed(
     reason: Extract<
       AudioStreamTelemetryEvent<Channel>,
-      { type: 'stream.replace-failed' }
-    >['reason'],
+      { type: "stream.replace-failed" }
+    >["reason"],
   ): false {
     emitAudioTelemetry(this.#telemetry, {
-      type: 'stream.replace-failed',
+      type: "stream.replace-failed",
       channel: this.#channel,
       reason,
     });
@@ -757,9 +806,9 @@ async function waitForMedia(
       if (settled) return;
       settled = true;
       globalThis.clearTimeout(timer);
-      element.removeEventListener('canplay', onCanPlay);
-      element.removeEventListener('error', onError);
-      signal.removeEventListener('abort', onAbort);
+      element.removeEventListener("canplay", onCanPlay);
+      element.removeEventListener("error", onError);
+      signal.removeEventListener("abort", onAbort);
       resolve(ready);
     };
     const onCanPlay = (): void => {
@@ -774,16 +823,16 @@ async function waitForMedia(
     const timer = globalThis.setTimeout(() => {
       finish(false);
     }, timeoutMs);
-    element.addEventListener('canplay', onCanPlay, { once: true });
-    element.addEventListener('error', onError, { once: true });
-    signal.addEventListener('abort', onAbort, { once: true });
+    element.addEventListener("canplay", onCanPlay, { once: true });
+    element.addEventListener("error", onError, { once: true });
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
 function resolveChannels<Channel extends string>(
   topology: AudioOutputTopology<Channel>,
 ): readonly (readonly [Channel, ResolvedChannelConfig])[] {
-  if (topology.mode === 'single-channel') {
+  if (topology.mode === "single-channel") {
     validateChannel(topology.channel);
     return [
       [
@@ -791,16 +840,20 @@ function resolveChannels<Channel extends string>(
         {
           level: clampAudioLevel(topology.config?.level ?? 1),
           maxVoices: 1,
-          overflow: 'stop-oldest',
+          overflow: "stop-oldest",
         },
       ],
     ];
   }
-  const entries = Object.entries(topology.channels) as [Channel, AudioOutputChannelConfig][];
-  if (entries.length === 0) throw new RangeError('multi-channel output requires a channel');
+  const entries = Object.entries(topology.channels) as [
+    Channel,
+    AudioOutputChannelConfig,
+  ][];
+  if (entries.length === 0)
+    throw new RangeError("multi-channel output requires a channel");
   return entries.map(([channel, config]) => {
     validateChannel(channel);
-    return [channel, resolveChannelConfig(config, 16, 'reject-new')] as const;
+    return [channel, resolveChannelConfig(config, 16, "reject-new")] as const;
   });
 }
 
@@ -810,11 +863,11 @@ function resolveChannelConfig(
   defaultOverflow: AudioVoiceOverflowPolicy,
 ): ResolvedChannelConfig {
   const maxVoices = config?.maxVoices ?? defaultMaxVoices;
-  positiveSafeInteger(maxVoices, 'maxVoices');
+  positiveSafeInteger(maxVoices, "maxVoices");
   const configuredOverflow: unknown = config?.overflow;
   const overflow = configuredOverflow ?? defaultOverflow;
-  if (overflow !== 'reject-new' && overflow !== 'stop-oldest') {
-    throw new RangeError('overflow must be reject-new or stop-oldest');
+  if (overflow !== "reject-new" && overflow !== "stop-oldest") {
+    throw new RangeError("overflow must be reject-new or stop-oldest");
   }
   return {
     level: clampAudioLevel(config?.level ?? 1),
@@ -824,7 +877,7 @@ function resolveChannelConfig(
 }
 
 function validateChannel(channel: string): void {
-  if (channel === '') throw new RangeError('audio channel must not be empty');
+  if (channel === "") throw new RangeError("audio channel must not be empty");
 }
 
 function terminateAll(active: Set<ActiveSlot>): void {
@@ -842,17 +895,42 @@ function milliseconds(value: number, name: string): number {
   return value / 1000;
 }
 
-function configureLimiter(node: DynamicsCompressorNode, config: AudioLimiterConfig): void {
-  node.threshold.value = bounded(config.thresholdDb ?? -8, -100, 0, 'thresholdDb');
-  node.knee.value = bounded(config.kneeDb ?? 8, 0, 40, 'kneeDb');
-  node.ratio.value = bounded(config.ratio ?? 5, 1, 20, 'ratio');
-  node.attack.value = bounded(config.attackSeconds ?? 0.004, 0, 1, 'attackSeconds');
-  node.release.value = bounded(config.releaseSeconds ?? 0.18, 0, 1, 'releaseSeconds');
+function configureLimiter(
+  node: DynamicsCompressorNode,
+  config: AudioLimiterConfig,
+): void {
+  node.threshold.value = bounded(
+    config.thresholdDb ?? -8,
+    -100,
+    0,
+    "thresholdDb",
+  );
+  node.knee.value = bounded(config.kneeDb ?? 8, 0, 40, "kneeDb");
+  node.ratio.value = bounded(config.ratio ?? 5, 1, 20, "ratio");
+  node.attack.value = bounded(
+    config.attackSeconds ?? 0.004,
+    0,
+    1,
+    "attackSeconds",
+  );
+  node.release.value = bounded(
+    config.releaseSeconds ?? 0.18,
+    0,
+    1,
+    "releaseSeconds",
+  );
 }
 
-function bounded(value: number, minimum: number, maximum: number, name: string): number {
+function bounded(
+  value: number,
+  minimum: number,
+  maximum: number,
+  name: string,
+): number {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${name} must be between ${String(minimum)} and ${String(maximum)}`);
+    throw new RangeError(
+      `${name} must be between ${String(minimum)} and ${String(maximum)}`,
+    );
   }
   return value;
 }

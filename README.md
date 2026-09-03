@@ -78,6 +78,8 @@ domain event → application cue mapping → AudioCueRequest
 - Channel and master faders follow their insert effects so ducking and mute also control effect
   tails.
 - Rust processes complete interleaved frames in place without allocating in the audio loop.
+- Rust live updates crossfade old and new processors over 20 ms; validation and replacement
+  allocation happen only on the control path.
 - Rust rejects stream shapes and effect chains that exceed fixed sample-rate, channel, effect-count,
   or persistent-state memory budgets before allocating processor state.
 - Non-finite input samples are sanitized before reaching stateful DSP.
@@ -246,6 +248,22 @@ const output = new WebAudioOutput(context, topology, {
 await output.masterEffectInsert?.setEnabled('glue', true);
 ```
 
+The Rust worklet also accepts a complete validated replacement for an existing effect. Identity,
+effect type, and chain position remain stable across the update:
+
+```ts
+const chain = rustEffects?.createEffectChain([
+  { id: 'tone', type: 'lowpass', frequencyHz: 18_000 },
+]);
+await chain?.ready;
+await chain?.updateEffect({
+  id: 'tone',
+  type: 'lowpass',
+  frequencyHz: 8_000,
+  q: 0.9,
+});
+```
+
 `masterEffectChain` and `channelEffectChain` expose native-node automation only. The backend-neutral
 `masterEffectInsert` and `channelEffectInsert` expose backend identity and asynchronous bypass
 control for both renderers.
@@ -269,6 +287,16 @@ let effects = [EffectConfig::Filter(FilterConfig {
 })];
 let mut chain = EffectChain::new(48_000.0, 2, &effects)?;
 chain.process_interleaved(&mut stereo_pcm)?;
+chain.update_effect(
+    "rumble-cut",
+    EffectConfig::Filter(FilterConfig {
+        id: "rumble-cut".into(),
+        enabled: true,
+        kind: FilterKind::HighPass,
+        frequency_hz: 60.0,
+        q: 0.9,
+    }),
+)?;
 ```
 
 ## Extension points
@@ -280,7 +308,7 @@ one context. `AudioCueRequest` is generic over the application cue vocabulary.
 
 ## Runtime boundary and optional adapters
 
-The reusable `0.1` engine boundary is complete for its declared scope. It deliberately does not own
+The reusable `0.2` engine boundary is complete for its declared scope. It deliberately does not own
 adaptive bitrate delivery, captions, a media catalog, React settings, or Babylon world positioning.
 Those are integration packages or product behavior and should be added only with real consumers.
 The Rust renderer is opt-in because worklet loading is asynchronous and native Web Audio remains a

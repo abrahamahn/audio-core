@@ -339,3 +339,163 @@ fn sanitizes_non_finite_pcm_before_it_can_poison_processor_state() {
         .expect("complete frames");
     assert!(recovery.iter().all(|sample| sample.is_finite()));
 }
+
+#[test]
+fn live_updates_preserve_identity_type_and_crossfade_processor_state() {
+    let original = EffectConfig::Saturation(SaturationConfig {
+        id: "sat".to_owned(),
+        enabled: true,
+        drive: 0.0,
+        mix: 1.0,
+    });
+    let mut chain = EffectChain::new(SAMPLE_RATE, 1, &[original]).expect("valid saturation");
+    let updated = EffectConfig::Saturation(SaturationConfig {
+        id: "sat".to_owned(),
+        enabled: true,
+        drive: 100.0,
+        mix: 1.0,
+    });
+    assert_eq!(chain.update_effect("sat", updated.clone()), Ok(true));
+
+    let mut transition = [0.5; 21];
+    chain
+        .process_interleaved(&mut transition)
+        .expect("complete frames");
+    assert!(transition[0] > 0.5 && transition[0] < 0.6);
+    assert!(transition.windows(2).all(|pair| pair[1] >= pair[0]));
+    assert!(transition[20] > 0.95);
+
+    let renamed = EffectConfig::Saturation(SaturationConfig {
+        id: "other".to_owned(),
+        enabled: true,
+        drive: 1.0,
+        mix: 1.0,
+    });
+    assert_eq!(
+        chain.update_effect_at(0, renamed),
+        Err(EffectError::EffectIdentityMismatch)
+    );
+    assert_eq!(
+        chain.update_effect_at(0, filter("sat", FilterKind::LowPass, 100.0)),
+        Err(EffectError::EffectTypeMismatch)
+    );
+    assert_eq!(chain.update_effect("missing", updated), Ok(false));
+}
+
+#[test]
+fn live_bypass_is_smoothed_instead_of_switching_at_a_sample_boundary() {
+    let mut chain = EffectChain::new(
+        SAMPLE_RATE,
+        1,
+        &[EffectConfig::Saturation(SaturationConfig {
+            id: "sat".to_owned(),
+            enabled: true,
+            drive: 100.0,
+            mix: 1.0,
+        })],
+    )
+    .expect("valid saturation");
+    assert!(chain.set_enabled("sat", false));
+    let mut transition = [0.5; 21];
+    chain
+        .process_interleaved(&mut transition)
+        .expect("complete frames");
+    assert!(transition[0] > 0.9);
+    assert!(transition.windows(2).all(|pair| pair[1] <= pair[0]));
+    assert!((transition[20] - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn every_effect_category_accepts_valid_live_reconfiguration() {
+    let effects = vec![
+        filter("filter", FilterKind::LowPass, 400.0),
+        EffectConfig::Equalizer(EqualizerConfig {
+            id: "eq".to_owned(),
+            enabled: true,
+            bands: vec![EqualizerBand {
+                kind: EqualizerBandKind::Peaking,
+                frequency_hz: 200.0,
+                gain_db: 0.0,
+                q: 1.0,
+            }],
+        }),
+        EffectConfig::Compressor(CompressorConfig {
+            id: "comp".to_owned(),
+            enabled: true,
+            threshold_db: -18.0,
+            knee_db: 6.0,
+            ratio: 4.0,
+            attack_seconds: 0.003,
+            release_seconds: 0.1,
+            makeup_gain_db: 0.0,
+            mix: 1.0,
+        }),
+        EffectConfig::Delay(DelayConfig {
+            id: "delay".to_owned(),
+            enabled: true,
+            delay_seconds: 0.1,
+            feedback: 0.2,
+            wet: 0.2,
+            dry: 1.0,
+        }),
+        EffectConfig::Reverb(ReverbConfig {
+            id: "verb".to_owned(),
+            enabled: true,
+            room_size: 0.5,
+            damping: 0.3,
+            pre_delay_seconds: 0.01,
+            wet: 0.2,
+            dry: 1.0,
+        }),
+    ];
+    let mut chain = EffectChain::new(SAMPLE_RATE, 1, &effects).expect("valid chain");
+    let updates = vec![
+        filter("filter", FilterKind::LowPass, 300.0),
+        EffectConfig::Equalizer(EqualizerConfig {
+            id: "eq".to_owned(),
+            enabled: true,
+            bands: vec![EqualizerBand {
+                kind: EqualizerBandKind::Peaking,
+                frequency_hz: 250.0,
+                gain_db: 3.0,
+                q: 0.8,
+            }],
+        }),
+        EffectConfig::Compressor(CompressorConfig {
+            id: "comp".to_owned(),
+            enabled: true,
+            threshold_db: -12.0,
+            knee_db: 3.0,
+            ratio: 2.0,
+            attack_seconds: 0.01,
+            release_seconds: 0.2,
+            makeup_gain_db: 1.0,
+            mix: 0.8,
+        }),
+        EffectConfig::Delay(DelayConfig {
+            id: "delay".to_owned(),
+            enabled: true,
+            delay_seconds: 0.2,
+            feedback: 0.4,
+            wet: 0.4,
+            dry: 0.8,
+        }),
+        EffectConfig::Reverb(ReverbConfig {
+            id: "verb".to_owned(),
+            enabled: true,
+            room_size: 0.8,
+            damping: 0.6,
+            pre_delay_seconds: 0.02,
+            wet: 0.4,
+            dry: 0.8,
+        }),
+    ];
+    for (index, update) in updates.into_iter().enumerate() {
+        assert_eq!(chain.update_effect_at(index, update), Ok(true));
+    }
+    let mut audio = [0.25; 128];
+    chain
+        .process_interleaved(&mut audio)
+        .expect("complete frames");
+    assert!(audio.iter().all(|sample| sample.is_finite()));
+}

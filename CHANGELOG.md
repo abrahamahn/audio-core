@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Add complete live Rust/Wasm effect reconfiguration without rebuilding AudioWorklet nodes.
+- Crossfade bypass and processor replacements over 20 ms without allocating during sample renders.
+- Enforce stable effect identity, type, validation, and temporary DSP-state budgets on updates.
+- Verify native Rust and browser Wasm against one six-effect golden impulse-response corpus.
+- Add a release-mode full-chain render benchmark for repeatable DSP performance checks.
+
 ## 0.1.1
 
 - Bound DSP channels, effects, sample rates, and persistent processor state before allocation.
