@@ -7,16 +7,16 @@ import { WebAudioOutput, WebAudioStreamController } from "../src/web-audio.js";
 class FakeAudioParam {
   value = 0;
   readonly cancelScheduledValues = vi.fn((time: number) => {
-    void time;
+    Boolean(time);
     return this;
   });
   readonly setValueAtTime = vi.fn((value: number, time: number) => {
-    void time;
+    Boolean(time);
     this.value = value;
     return this;
   });
   readonly linearRampToValueAtTime = vi.fn((value: number, time: number) => {
-    void time;
+    Boolean(time);
     this.value = value;
     return this;
   });
@@ -25,7 +25,7 @@ class FakeAudioParam {
 class FakeAudioNode {
   readonly connect = vi.fn((target: FakeAudioNode) => target);
   readonly disconnect = vi.fn((target?: FakeAudioNode) => {
-    void target;
+    Boolean(target);
   });
 }
 
