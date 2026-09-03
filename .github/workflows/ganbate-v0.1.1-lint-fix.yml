@@ -1,0 +1,106 @@
+name: Prepare Ganbate Audio Core Lint-Compatible Pin
+
+on:
+  push:
+    branches: [compat/ganbate-v0.1.1-lint-fix]
+
+permissions:
+  contents: write
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  repair:
+    if: "${{ github.event.head_commit.message == 'ci: prepare Ganbate audio-core lint-compatible pin' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.127
+      - run: corepack enable
+      - name: Install exact v0.1.1 TypeScript package
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+      - name: Apply test-only lint compatibility repairs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cache = Path('typescript/tests/cache-policy.test.ts')
+          source = cache.read_text()
+          replacements = [
+              (
+                  """    const fetchEncoded = vi.fn((url: string) => {\n      void url;\n      return Promise.resolve(new ArrayBuffer(2));\n    });\n""",
+                  """    const fetchEncoded = vi.fn((_url: string) =>\n      Promise.resolve(new ArrayBuffer(2)),\n    );\n""",
+              ),
+              (
+                  """      decode: (context: object, bytes: ArrayBuffer) => {\n        void context;\n        void bytes;\n        return Promise.resolve(null);\n      },\n""",
+                  """      decode: (_context: object, _bytes: ArrayBuffer) => Promise.resolve(null),\n""",
+              ),
+          ]
+          for old, new in replacements:
+              if source.count(old) != 1:
+                  raise SystemExit('cache-policy replacement did not match exactly once')
+              source = source.replace(old, new)
+          cache.write_text(source)
+
+          web = Path('typescript/tests/web-audio.test.ts')
+          source = web.read_text()
+          replacements = [
+              (
+                  """  readonly cancelScheduledValues = vi.fn((time: number) => {\n    void time;\n    return this;\n  });\n""",
+                  """  readonly cancelScheduledValues = vi.fn((_time: number) => this);\n""",
+              ),
+              (
+                  """  readonly setValueAtTime = vi.fn((value: number, time: number) => {\n    void time;\n    this.value = value;\n    return this;\n  });\n""",
+                  """  readonly setValueAtTime = vi.fn((value: number, _time: number) => {\n    this.value = value;\n    return this;\n  });\n""",
+              ),
+              (
+                  """  readonly linearRampToValueAtTime = vi.fn((value: number, time: number) => {\n    void time;\n    this.value = value;\n    return this;\n  });\n""",
+                  """  readonly linearRampToValueAtTime = vi.fn((value: number, _time: number) => {\n    this.value = value;\n    return this;\n  });\n""",
+              ),
+              (
+                  """  readonly disconnect = vi.fn((target?: FakeAudioNode) => {\n    void target;\n  });\n""",
+                  """  readonly disconnect = vi.fn((_target?: FakeAudioNode) => undefined);\n""",
+              ),
+              (
+                  """  readonly start = vi.fn((when?: number, offset?: number, duration?: number) => {\n    void when;\n    void offset;\n    void duration;\n  });\n""",
+                  """  readonly start = vi.fn(\n    (_when?: number, _offset?: number, _duration?: number) => undefined,\n  );\n""",
+              ),
+          ]
+          for old, new in replacements:
+              if source.count(old) != 1:
+                  raise SystemExit('web-audio replacement did not match exactly once')
+              source = source.replace(old, new)
+          web.write_text(source)
+          PY
+          rm .github/workflows/ganbate-v0.1.1-lint-fix.yml
+          git diff --check
+      - name: Validate exact publishable v0.1.1 TypeScript package
+        working-directory: typescript
+        run: pnpm prepack
+      - name: Commit and publish minimal compatibility pin
+        run: |
+          git config user.name 'Audio Core Maintenance'
+          git config user.email '48481888+abrahamahn@users.noreply.github.com'
+          git add \
+            typescript/tests/cache-policy.test.ts \
+            typescript/tests/web-audio.test.ts \
+            .github/workflows/ganbate-v0.1.1-lint-fix.yml
+          git diff --cached --check
+          git commit -m 'test(typescript): make v0.1.1 package lint-compatible'
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:compat/ganbate-v0.1.1-lint-fix
