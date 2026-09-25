@@ -533,7 +533,7 @@ interface ActiveStream<Channel extends string> {
 }
 
 interface PendingStream<Channel extends string> {
-  readonly timer: number;
+  readonly timer: ReturnType<typeof globalThis.setTimeout>;
   readonly connection: AudioOutputConnection<Channel>;
 }
 
