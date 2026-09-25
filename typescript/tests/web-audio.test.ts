@@ -91,12 +91,8 @@ class FakeBufferSourceNode extends FakeAudioNode {
   loop = false;
   onended: (() => void) | null = null;
   readonly playbackRate = new FakeAudioParam();
-  readonly start = vi.fn(
-    (when?: number, offset?: number, duration?: number) => {
-      void when;
-      void offset;
-      void duration;
-    },
+  readonly start = vi.fn<(when?: number, offset?: number, duration?: number) => void>(
+    () => undefined,
   );
   readonly stop = vi.fn(() => undefined);
 }
