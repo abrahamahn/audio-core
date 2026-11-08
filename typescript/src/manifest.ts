@@ -1,3 +1,5 @@
+import { finiteNumber, nonNegativeFinite } from "./validation.js";
+
 export type AudioAssetDeliveryPolicy = "auto" | "decode" | "stream";
 export type AudioAssetLoadMode = Exclude<AudioAssetDeliveryPolicy, "auto">;
 
@@ -91,12 +93,10 @@ export function resolveAudioAssetLoadMode(
   if (delivery === "stream") return streamingSupported ? "stream" : null;
   if (!streamingSupported) return "decode";
   if (policy.lowMemory === true) return "stream";
-  const maxDecodedDurationMs = policy.maxDecodedDurationMs ?? 120_000;
-  if (!Number.isFinite(maxDecodedDurationMs) || maxDecodedDurationMs < 0) {
-    throw new RangeError(
-      "maxDecodedDurationMs must be finite and non-negative",
-    );
-  }
+  const maxDecodedDurationMs = nonNegativeFinite(
+    policy.maxDecodedDurationMs ?? 120_000,
+    "maxDecodedDurationMs",
+  );
   return entry.durationMs !== undefined &&
     entry.durationMs > maxDecodedDurationMs
     ? "stream"
@@ -108,19 +108,11 @@ export function validateManifestEntry(entry: AudioAssetManifestEntry): void {
     throw new RangeError("audio asset version must not be empty");
   if (entry.variants.length === 0)
     throw new RangeError("audio asset requires a variant");
-  if (
-    entry.durationMs !== undefined &&
-    (!Number.isFinite(entry.durationMs) || entry.durationMs < 0)
-  ) {
-    throw new RangeError(
-      "audio asset durationMs must be finite and non-negative",
-    );
+  if (entry.durationMs !== undefined) {
+    nonNegativeFinite(entry.durationMs, "audio asset durationMs");
   }
-  if (
-    entry.loudnessLufs !== undefined &&
-    !Number.isFinite(entry.loudnessLufs)
-  ) {
-    throw new RangeError("audio asset loudnessLufs must be finite");
+  if (entry.loudnessLufs !== undefined) {
+    finiteNumber(entry.loudnessLufs, "audio asset loudnessLufs");
   }
   for (const variant of entry.variants) {
     if (variant.url === "")

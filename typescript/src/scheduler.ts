@@ -1,4 +1,9 @@
 import type { AudioCueRequest } from "./policy.js";
+import {
+  finiteNumber,
+  nonNegativeFinite,
+  positiveSafeInteger,
+} from "./validation.js";
 
 export interface CueSchedulerOptions<Cue extends string> {
   readonly defaultMinGapMs?: number;
@@ -43,38 +48,33 @@ export class CueScheduler<Cue extends string> {
   readonly #rememberedEventIds = new Set<string>();
 
   constructor(options: CueSchedulerOptions<Cue> = {}) {
-    this.#defaultMinGapMs = options.defaultMinGapMs ?? 0;
-    if (!Number.isFinite(this.#defaultMinGapMs) || this.#defaultMinGapMs < 0) {
-      throw new RangeError("defaultMinGapMs must be finite and non-negative");
-    }
+    this.#defaultMinGapMs = nonNegativeFinite(
+      options.defaultMinGapMs ?? 0,
+      "defaultMinGapMs",
+    );
     this.#minGapForCue = options.minGapForCue;
     this.#maxLateByMs = options.maxLateByMs ?? Number.POSITIVE_INFINITY;
     if (Number.isNaN(this.#maxLateByMs) || this.#maxLateByMs < 0) {
       throw new RangeError("maxLateByMs must be non-negative");
     }
-    this.#maxRememberedEventIds = options.maxRememberedEventIds ?? 1024;
-    if (
-      !Number.isSafeInteger(this.#maxRememberedEventIds) ||
-      this.#maxRememberedEventIds <= 0
-    ) {
-      throw new RangeError(
-        "maxRememberedEventIds must be a positive safe integer",
-      );
-    }
+    this.#maxRememberedEventIds = positiveSafeInteger(
+      options.maxRememberedEventIds ?? 1024,
+      "maxRememberedEventIds",
+    );
   }
 
   canPlay(cue: Cue, nowMs: number, cancellationGroup?: string): boolean {
-    if (!Number.isFinite(nowMs)) throw new RangeError("nowMs must be finite");
+    finiteNumber(nowMs, "nowMs");
     if (
       cancellationGroup !== undefined &&
       this.#cancelledGroups.has(cancellationGroup)
     ) {
       return false;
     }
-    const configuredGap = this.#minGapForCue?.(cue) ?? this.#defaultMinGapMs;
-    if (!Number.isFinite(configuredGap) || configuredGap < 0) {
-      throw new RangeError("cue minimum gap must be finite and non-negative");
-    }
+    const configuredGap = nonNegativeFinite(
+      this.#minGapForCue?.(cue) ?? this.#defaultMinGapMs,
+      "cue minimum gap",
+    );
     return (
       nowMs - (this.#lastPlayed.get(cue) ?? Number.NEGATIVE_INFINITY) >=
       configuredGap
@@ -82,7 +82,7 @@ export class CueScheduler<Cue extends string> {
   }
 
   markPlayed(cue: Cue, nowMs: number, eventId?: string): void {
-    if (!Number.isFinite(nowMs)) throw new RangeError("nowMs must be finite");
+    finiteNumber(nowMs, "nowMs");
     this.#lastPlayed.set(cue, nowMs);
     if (eventId !== undefined && eventId !== "") this.#rememberEvent(eventId);
   }
@@ -91,21 +91,19 @@ export class CueScheduler<Cue extends string> {
     request: AudioCueRequest<Cue>,
     receivedAtMs: number,
   ): PlannedAudioCue<Cue> {
-    finiteTime(receivedAtMs, "receivedAtMs");
-    const scheduledAtMs = request.scheduledAtMs ?? receivedAtMs;
-    finiteTime(scheduledAtMs, "scheduledAtMs");
-    const delayMs = request.delayMs ?? 0;
-    if (!Number.isFinite(delayMs) || delayMs < 0) {
-      throw new RangeError("delayMs must be finite and non-negative");
-    }
-    const dueAtMs = scheduledAtMs + delayMs;
-    finiteTime(dueAtMs, "dueAtMs");
+    finiteNumber(receivedAtMs, "receivedAtMs");
+    const scheduledAtMs = finiteNumber(
+      request.scheduledAtMs ?? receivedAtMs,
+      "scheduledAtMs",
+    );
+    const delayMs = nonNegativeFinite(request.delayMs ?? 0, "delayMs");
+    const dueAtMs = finiteNumber(scheduledAtMs + delayMs, "dueAtMs");
     return { request, dueAtMs };
   }
 
   inspect(planned: PlannedAudioCue<Cue>, nowMs: number): CuePlaybackDecision {
-    finiteTime(nowMs, "nowMs");
-    finiteTime(planned.dueAtMs, "dueAtMs");
+    finiteNumber(nowMs, "nowMs");
+    finiteNumber(planned.dueAtMs, "dueAtMs");
     const { request, dueAtMs } = planned;
     if (
       request.cancellationGroup !== undefined &&
@@ -166,8 +164,4 @@ export class CueScheduler<Cue extends string> {
       this.#rememberedEventIds.delete(oldest);
     }
   }
-}
-
-function finiteTime(value: number, name: string): void {
-  if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
 }

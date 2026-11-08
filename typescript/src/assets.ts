@@ -3,6 +3,7 @@ import {
   type AudioAssetCacheTelemetryEvent,
   type AudioTelemetrySink,
 } from "./telemetry.js";
+import { positiveSafeInteger } from "./validation.js";
 
 export interface AudioAssetCacheOptions<Context extends object, Decoded> {
   readonly fetchEncoded: (url: string) => Promise<ArrayBuffer | null>;
@@ -32,11 +33,11 @@ export class AudioAssetCache<Context extends object, Decoded> {
     this.#fetchEncoded = options.fetchEncoded;
     this.#decode = options.decode;
     this.#telemetry = options.telemetry;
-    this.#maxEncodedEntries = positiveInteger(
+    this.#maxEncodedEntries = positiveSafeInteger(
       options.maxEncodedEntries ?? 64,
       "maxEncodedEntries",
     );
-    this.#maxDecodedEntriesPerContext = positiveInteger(
+    this.#maxDecodedEntriesPerContext = positiveSafeInteger(
       options.maxDecodedEntriesPerContext ?? 32,
       "maxDecodedEntriesPerContext",
     );
@@ -148,13 +149,6 @@ export class AudioAssetCache<Context extends object, Decoded> {
   #emitFetchFailure(url: string): void {
     emitAudioTelemetry(this.#telemetry, { type: "asset.fetch-failed", url });
   }
-}
-
-function positiveInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new RangeError(`${name} must be a positive safe integer`);
-  }
-  return value;
 }
 
 function touch<Key, Value>(map: Map<Key, Value>, key: Key, value: Value): void {

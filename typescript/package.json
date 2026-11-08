@@ -24,6 +24,11 @@
       "types": "./dist/web-audio.d.ts",
       "default": "./dist/web-audio.js"
     },
+    "./web-audio-stream": {
+      "source": "./src/web-audio-stream.ts",
+      "types": "./dist/web-audio-stream.d.ts",
+      "default": "./dist/web-audio-stream.js"
+    },
     "./web-audio-effects": {
       "source": "./src/web-audio-effects.ts",
       "types": "./dist/web-audio-effects.d.ts",

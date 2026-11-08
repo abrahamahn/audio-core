@@ -1,8 +1,9 @@
 use wasm_bindgen::prelude::*;
 
-use crate::{
-    CompressorConfig, DelayConfig, EffectChain, EffectConfig, EqualizerBand, EqualizerBandKind,
-    EqualizerConfig, FilterConfig, FilterKind, MAX_DSP_CHANNELS, ReverbConfig, SaturationConfig,
+use crate::chain::EffectChain;
+use crate::config::{
+    CompressorConfig, DelayConfig, EffectConfig, EqualizerBand, EqualizerBandKind, EqualizerConfig,
+    FilterConfig, FilterKind, MAX_DSP_CHANNELS, ReverbConfig, SaturationConfig,
 };
 
 const MAX_BLOCK_FRAMES: usize = 4_096;

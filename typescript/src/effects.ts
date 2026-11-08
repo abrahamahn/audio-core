@@ -1,3 +1,5 @@
+import { bounded, unit } from "./validation.js";
+
 export interface AudioEffectBase {
   /** Stable application-owned identity used for live control and diagnostics. */
   readonly id: string;
@@ -178,22 +180,5 @@ export function validateAudioEffectConfig(effect: AudioEffectConfig): void {
       throw new RangeError(
         `unsupported audio effect type: ${String((effect as { type: unknown }).type)}`,
       );
-  }
-}
-
-function unit(value: number, name: string): void {
-  bounded(value, 0, 1, name);
-}
-
-function bounded(
-  value: number,
-  minimum: number,
-  maximum: number,
-  name: string,
-): void {
-  if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(
-      `${name} must be between ${String(minimum)} and ${String(maximum)}`,
-    );
   }
 }

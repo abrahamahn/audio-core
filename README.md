@@ -209,7 +209,7 @@ const compressor = gameOutput.masterEffectChain?.effect('glue');
 if (compressor?.type === 'compressor') compressor.setMakeupGainDb(1.5);
 ```
 
-`WebAudioStreamController`, available from the same `./web-audio` entrypoint, provides serialized,
+`WebAudioStreamController`, available from the `./web-audio-stream` entrypoint, provides serialized,
 readiness-aware replacement and optional crossfades for one logical music or radio stream. Media
 elements and their URLs remain caller-owned.
 

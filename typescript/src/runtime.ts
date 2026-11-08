@@ -10,6 +10,7 @@ import {
   type AudioCueRuntimeTelemetryEvent,
   type AudioTelemetrySink,
 } from "./telemetry.js";
+import { finiteNumber, nonNegativeFinite } from "./validation.js";
 
 export type AudioCueIntent<Cue extends string> = Omit<
   AudioCueRequest<Cue>,
@@ -54,13 +55,10 @@ export function planAudioSequence<Cue extends string>(
   steps: readonly AudioCueSequenceStep<Cue>[],
   startsAtMs: number,
 ): readonly PlannedAudioCue<Cue>[] {
-  if (!Number.isFinite(startsAtMs))
-    throw new RangeError("startsAtMs must be finite");
+  finiteNumber(startsAtMs, "startsAtMs");
   let previousOffset = Number.NEGATIVE_INFINITY;
   return steps.map(({ request, offsetMs }) => {
-    if (!Number.isFinite(offsetMs) || offsetMs < 0) {
-      throw new RangeError("sequence offsetMs must be finite and non-negative");
-    }
+    nonNegativeFinite(offsetMs, "sequence offsetMs");
     if (offsetMs < previousOffset) {
       throw new RangeError("sequence offsets must be ordered");
     }

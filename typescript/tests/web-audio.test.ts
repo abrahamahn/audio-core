@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AudioOutputTopology } from "../src/output.js";
 import type { AudioOutputTelemetryEvent } from "../src/telemetry.js";
-import { WebAudioOutput, WebAudioStreamController } from "../src/web-audio.js";
+import { WebAudioStreamController } from "../src/web-audio-stream.js";
+import { WebAudioOutput } from "../src/web-audio.js";
 
 class FakeAudioParam {
   value = 0;

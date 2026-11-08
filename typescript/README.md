@@ -9,7 +9,7 @@ limiting, per-channel/master effect chains, and failure-isolated telemetry contr
 The root entrypoint does not create an `AudioContext`, read browser storage, fetch a fixed asset, or
 define application cue names. The `./web-audio` entrypoint routes caller-owned streams and decoded
 buffers through either one replaceable channel or named simultaneous channels under a master bus;
-its stream controller serializes readiness-aware replacements and optional crossfades.
+the `./web-audio-stream` entrypoint serializes readiness-aware replacements and optional crossfades.
 Context recovery and stream/output/cache/runtime telemetry are typed, injected, and isolated so a
 failing observer cannot alter playback.
 
